@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MindKey Dashboard</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">MK</div>
+      <div class="brand-text">
+        <div class="brand-name">MindKey</div>
+        <div class="brand-sub">Behavioral Insight</div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <a href="#" class="nav-item active" data-view="overview">Overview</a>
+      <a href="#" class="nav-item" data-view="trends">Trends</a>
+      <a href="#" class="nav-item" data-view="sessions">Sessions</a>
+      <a href="#" class="nav-item" data-view="privacy">Privacy &amp; Controls</a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="agent-status">
+        <span class="dot dot-active"></span>
+        <span>Agent running</span>
+      </div>
+      <button class="btn btn-ghost btn-small" id="pauseAgentBtn">Pause monitoring</button>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="main">
+
+    <header class="topbar">
+      <div>
+        <h1>Behavioral Overview</h1>
+        <p class="muted">Passive typing-behavior monitoring &middot; last updated <span id="lastUpdated">just now</span></p>
+      </div>
+      <div class="topbar-actions">
+        <label class="user-select">
+          User:
+          <select id="userSelect">
+            <option value="user_1">User 1 (Demo)</option>
+          </select>
+        </label>
+        <button class="btn btn-outline" id="refreshBtn">Refresh</button>
+      </div>
+    </header>
+
+    <div class="disclaimer-banner">
+      <strong>Not a medical diagnosis.</strong>
+      MindKey detects persistent changes in your own typing behavior over time. It does not diagnose dementia, Parkinson's, or any other condition. If a persistent change is flagged, consider discussing it with a qualified healthcare professional.
+    </div>
+
+    <!-- Status + Metrics -->
+    <section class="grid-top">
+
+      <div class="card status-card">
+        <div class="card-label">Behavioral Status</div>
+        <div class="status-badge" id="statusBadge">STABLE</div>
+        <div class="baseline-consistency">
+          Baseline consistency: <strong id="baselineConsistency">91%</strong>
+        </div>
+        <div class="status-note" id="statusNote">
+          Your recent typing sessions are consistent with your personal baseline.
+        </div>
+      </div>
+
+      <div class="card metrics-card">
+        <div class="card-label">Session Metrics (baseline &rarr; recent)</div>
+        <div class="metrics-grid">
+          <div class="metric">
+            <div class="metric-name">WPM</div>
+            <div class="metric-value"><span id="wpmBase">52</span> &rarr; <span id="wpmNow">49</span></div>
+          </div>
+          <div class="metric">
+            <div class="metric-name">Dwell time</div>
+            <div class="metric-value"><span id="dwellBase">82</span> &rarr; <span id="dwellNow">91</span> ms</div>
+          </div>
+          <div class="metric">
+            <div class="metric-name">Flight time</div>
+            <div class="metric-value"><span id="flightBase">121</span> &rarr; <span id="flightNow">137</span> ms</div>
+          </div>
+          <div class="metric">
+            <div class="metric-name">Pauses / session</div>
+            <div class="metric-value"><span id="pauseBase">4</span> &rarr; <span id="pauseNow">7</span></div>
+          </div>
+          <div class="metric">
+            <div class="metric-name">Correction rate</div>
+            <div class="metric-value"><span id="correctionBase">3%</span> &rarr; <span id="correctionNow">6%</span></div>
+          </div>
+          <div class="metric">
+            <div class="metric-name">Rhythm variability</div>
+            <div class="metric-value"><span id="rhythmBase">0.12</span> &rarr; <span id="rhythmNow">0.18</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card anomaly-card">
+        <div class="card-label">Anomaly Score</div>
+        <div class="anomaly-score" id="anomalyScore">0.34</div>
+        <div class="anomaly-scale">
+          <div class="anomaly-scale-fill" id="anomalyScaleFill"></div>
+        </div>
+        <div class="anomaly-legend">
+          <span>Normal</span>
+          <span>Persistent deviation</span>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Trend chart -->
+    <section class="card chart-card">
+      <div class="chart-card-header">
+        <div class="card-label">Typing Consistency Over Time</div>
+        <div class="chart-toggle">
+          <button class="chip active" data-metric="consistency">Consistency</button>
+          <button class="chip" data-metric="wpm">WPM</button>
+          <button class="chip" data-metric="dwell">Dwell</button>
+          <button class="chip" data-metric="flight">Flight</button>
+          <button class="chip" data-metric="pauses">Pauses</button>
+        </div>
+      </div>
+      <canvas id="trendChart" height="110"></canvas>
+      <div class="chart-footnote">
+        Shaded region marks sessions flagged as a persistent deviation from the personal baseline, not a single unusual session.
+      </div>
+    </section>
+
+    <!-- Recent sessions -->
+    <section class="card sessions-card">
+      <div class="card-label">Recent Sessions</div>
+      <table class="sessions-table">
+        <thead>
+          <tr>
+            <th>Session</th>
+            <th>Date</th>
+            <th>WPM</th>
+            <th>Dwell (ms)</th>
+            <th>Flight (ms)</th>
+            <th>Pauses</th>
+            <th>Correction %</th>
+            <th>Anomaly</th>
+          </tr>
+        </thead>
+        <tbody id="sessionsTableBody">
+          <!-- populated by JS -->
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Privacy controls -->
+    <section class="card privacy-card" id="privacySection">
+      <div class="card-label">Privacy &amp; Data Controls</div>
+      <ul class="privacy-list">
+        <li><span class="check">&#10003;</span> Only keystroke timing metadata is processed &mdash; never the actual characters typed.</li>
+        <li><span class="check">&#10003;</span> No message content, passwords, or clipboard data are ever stored.</li>
+        <li><span class="check">&#10003;</span> Data minimization: MindKey stores only the minimum behavioral features required by the model.</li>
+        <li><span class="check">&#10003;</span> You can pause or stop monitoring at any time from this dashboard.</li>
+        <li><span class="check">&#10003;</span> Application exclusions can be configured (e.g. exclude password managers).</li>
+        <li><span class="check">&#10003;</span> Processing happens locally on your device where possible.</li>
+      </ul>
+      <div class="privacy-actions">
+        <button class="btn btn-outline" id="pauseAgentBtn2">Pause monitoring</button>
+        <button class="btn btn-danger" id="deleteDataBtn">Delete all my data</button>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
