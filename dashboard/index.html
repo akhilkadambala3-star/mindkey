@@ -3,182 +3,510 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MindKey Dashboard</title>
+<title>MindKey — Behavioral Insight</title>
+<meta name="description" content="MindKey observes everyday typing patterns to notice persistent changes in your own behavior over time. Not a diagnostic device.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
-<div class="app-shell">
+<div class="app">
 
-  <!-- Sidebar -->
+  <!-- ============ Sidebar ============ -->
   <aside class="sidebar">
-    <div class="brand">
-      <div class="brand-mark">MK</div>
-      <div class="brand-text">
-        <div class="brand-name">MindKey</div>
-        <div class="brand-sub">Behavioral Insight</div>
+    <div class="sidebar-top">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <span class="keycap keycap-a"></span>
+          <span class="keycap keycap-b"></span>
+        </span>
+        <span class="brand-name">MindKey</span>
       </div>
+
+      <nav class="nav" aria-label="Primary">
+        <a href="#" class="nav-item active" data-view="home">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 9.5 10 3.5l7 6M5 8.5V16a1 1 0 0 0 1 1h2.5v-4h3V17H14a1 1 0 0 0 1-1V8.5"/></svg>
+          <span>Home</span>
+        </a>
+        <a href="#" class="nav-item" data-view="trends">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 15.5h13M5.5 13.5l3-3.5 2.5 2 3.5-4.5"/></svg>
+          <span>Trends</span>
+        </a>
+        <a href="#" class="nav-item" data-view="sessions">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5.5h12M4 10h12M4 14.5h7.5"/></svg>
+          <span>Sessions</span>
+        </a>
+        <a href="#" class="nav-item" data-view="checkins">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 15.5s-5.8-3.4-5.8-7.3A3 3 0 0 1 10 6.2a3 3 0 0 1 5.8 2c0 3.9-5.8 7.3-5.8 7.3Z"/></svg>
+          <span>Check-ins</span>
+        </a>
+        <a href="#" class="nav-item" data-view="insights">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 10.5 7 7l3 3 6.5-6M3.5 15h13"/></svg>
+          <span>Health Insights</span>
+        </a>
+        <a href="#" class="nav-item" data-view="care">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="14" height="14" rx="3.5"/><path d="M10 6.5v7M6.5 10h7"/></svg>
+          <span>Medical Assistance</span>
+        </a>
+        <a href="#" class="nav-item" data-view="privacy">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3.2 16 5.5v4.2c0 4-2.6 6.3-6 7.1-3.4-.8-6-3.1-6-7.1V5.5L10 3.2Z"/><path d="m7.5 10 1.8 1.8 3.2-3.6"/></svg>
+          <span>Privacy</span>
+        </a>
+      </nav>
     </div>
 
-    <nav class="nav">
-      <a href="#" class="nav-item active" data-view="overview">Overview</a>
-      <a href="#" class="nav-item" data-view="trends">Trends</a>
-      <a href="#" class="nav-item" data-view="sessions">Sessions</a>
-      <a href="#" class="nav-item" data-view="privacy">Privacy &amp; Controls</a>
-    </nav>
-
-    <div class="sidebar-footer">
-      <div class="agent-status">
-        <span class="dot dot-active"></span>
-        <span>Agent running</span>
+    <div class="sidebar-bottom">
+      <a href="#" class="nav-item" data-view="settings">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.4"/><path d="M10 3.2v2M10 14.8v2M3.2 10h2M14.8 10h2M5.2 5.2l1.4 1.4M13.4 13.4l1.4 1.4M14.8 5.2l-1.4 1.4M6.6 13.4l-1.4 1.4"/></svg>
+        <span>Settings</span>
+      </a>
+      <div class="agent-chip" id="sidebarAgentChip" title="Agent status">
+        <span class="agent-dot" id="sidebarAgentDot"></span>
+        <span class="agent-chip-text" id="sidebarAgentText">Monitoring</span>
       </div>
-      <button class="btn btn-ghost btn-small" id="pauseAgentBtn">Pause monitoring</button>
     </div>
   </aside>
 
-  <!-- Main content -->
-  <main class="main">
+  <!-- ============ Main column ============ -->
+  <div class="shell">
 
     <header class="topbar">
-      <div>
-        <h1>Behavioral Overview</h1>
-        <p class="muted">Passive typing-behavior monitoring &middot; last updated <span id="lastUpdated">just now</span></p>
+      <div class="topbar-title">
+        <h1 id="pageTitle">Home</h1>
+        <p id="pageSubtitle" class="subtitle">Your personal behavioral overview</p>
       </div>
       <div class="topbar-actions">
-        <label class="user-select">
-          User:
-          <select id="userSelect">
-            <option value="user_1">User 1 (Demo)</option>
+        <div class="agent-chip" id="topbarAgentChip" title="Agent status">
+          <span class="agent-dot" id="topbarAgentDot"></span>
+          <span class="agent-chip-text" id="topbarAgentText">Monitoring</span>
+        </div>
+        <label class="demo-select" id="demoSelectWrap" title="Demo mode: choose a scenario to demonstrate">
+          <span class="demo-tag">Demo</span>
+          <select id="scenarioSelect">
+            <option value="consistent">Consistent pattern</option>
+            <option value="variation">Recent variation</option>
+            <option value="persistent">Persistent change</option>
           </select>
         </label>
-        <button class="btn btn-outline" id="refreshBtn">Refresh</button>
+        <button class="icon-btn" id="refreshBtn" title="Refresh data" aria-label="Refresh data">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 8.5A6 6 0 1 0 16 12M15.5 4.5v4h-4"/></svg>
+        </button>
       </div>
     </header>
 
-    <div class="disclaimer-banner">
-      <strong>Not a medical diagnosis.</strong>
-      MindKey detects persistent changes in your own typing behavior over time. It does not diagnose dementia, Parkinson's, or any other condition. If a persistent change is flagged, consider discussing it with a qualified healthcare professional.
-    </div>
+    <main class="main">
 
-    <!-- Status + Metrics -->
-    <section class="grid-top">
+      <!-- ================= HOME ================= -->
+      <section class="view" data-view="home">
+        <p class="greeting" id="greeting">Good morning</p>
 
-      <div class="card status-card">
-        <div class="card-label">Behavioral Status</div>
-        <div class="status-badge" id="statusBadge">STABLE</div>
-        <div class="baseline-consistency">
-          Baseline consistency: <strong id="baselineConsistency">91%</strong>
-        </div>
-        <div class="status-note" id="statusNote">
-          Your recent typing sessions are consistent with your personal baseline.
-        </div>
-      </div>
-
-      <div class="card metrics-card">
-        <div class="card-label">Session Metrics (baseline &rarr; recent)</div>
-        <div class="metrics-grid">
-          <div class="metric">
-            <div class="metric-name">WPM</div>
-            <div class="metric-value"><span id="wpmBase">52</span> &rarr; <span id="wpmNow">49</span></div>
+        <div class="status-panel" id="statusPanel">
+          <div class="status-panel-icon" id="statusIcon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4.5 13 8 9.5l3 3 8.5-8.5"/></svg>
           </div>
-          <div class="metric">
-            <div class="metric-name">Dwell time</div>
-            <div class="metric-value"><span id="dwellBase">82</span> &rarr; <span id="dwellNow">91</span> ms</div>
-          </div>
-          <div class="metric">
-            <div class="metric-name">Flight time</div>
-            <div class="metric-value"><span id="flightBase">121</span> &rarr; <span id="flightNow">137</span> ms</div>
-          </div>
-          <div class="metric">
-            <div class="metric-name">Pauses / session</div>
-            <div class="metric-value"><span id="pauseBase">4</span> &rarr; <span id="pauseNow">7</span></div>
-          </div>
-          <div class="metric">
-            <div class="metric-name">Correction rate</div>
-            <div class="metric-value"><span id="correctionBase">3%</span> &rarr; <span id="correctionNow">6%</span></div>
-          </div>
-          <div class="metric">
-            <div class="metric-name">Rhythm variability</div>
-            <div class="metric-value"><span id="rhythmBase">0.12</span> &rarr; <span id="rhythmNow">0.18</span></div>
+          <div class="status-panel-body">
+            <p class="eyebrow" id="statusEyebrow">Behavioral status</p>
+            <h2 id="statusHeadline">Your typing pattern is consistent</h2>
+            <p id="statusText">No meaningful change has been detected compared with your recent baseline.</p>
+            <div class="status-observed" id="statusObserved" hidden>
+              <p class="eyebrow">What we've noticed</p>
+              <ul id="statusObservedList"></ul>
+            </div>
+            <div class="status-actions" id="statusActions"></div>
           </div>
         </div>
-      </div>
 
-      <div class="card anomaly-card">
-        <div class="card-label">Anomaly Score</div>
-        <div class="anomaly-score" id="anomalyScore">0.34</div>
-        <div class="anomaly-scale">
-          <div class="anomaly-scale-fill" id="anomalyScaleFill"></div>
+        <section class="section" aria-labelledby="todayTitle">
+          <div class="section-head">
+            <h3 id="todayTitle">Today</h3>
+            <p class="section-note">A quick look at today's monitoring</p>
+          </div>
+          <div class="tile-grid">
+            <div class="tile">
+              <p class="tile-label">Sessions today</p>
+              <p class="tile-value"><span id="todaySessions">–</span><span class="tile-cap">/ 10</span></p>
+              <p class="tile-sub">daily analysis limit</p>
+            </div>
+            <div class="tile">
+              <p class="tile-label">Typing consistency</p>
+              <p class="tile-value"><span id="todayConsistency">–</span><span class="tile-unit">%</span></p>
+              <p class="tile-sub">vs. your recent baseline</p>
+            </div>
+            <div class="tile">
+              <p class="tile-label">Average speed</p>
+              <p class="tile-value"><span id="todaySpeed">–</span><span class="tile-unit">wpm</span></p>
+              <p class="tile-sub" id="todaySpeedSub">vs. baseline</p>
+            </div>
+            <div class="tile">
+              <p class="tile-label">Average dwell time</p>
+              <p class="tile-value"><span id="todayDwell">–</span><span class="tile-unit">ms</span></p>
+              <p class="tile-sub" id="todayDwellSub">vs. baseline</p>
+            </div>
+          </div>
+        </section>
+
+        <div class="home-grid">
+          <section class="card agent-card" aria-labelledby="agentTitle">
+            <div class="card-head">
+              <h3 id="agentTitle">Monitoring</h3>
+              <span class="agent-state" id="agentStateText">Waiting for typing</span>
+            </div>
+            <p class="agent-line" id="agentLine">MindKey listens for your next typing activity.</p>
+            <div class="agent-progress" id="agentProgress" hidden>
+              <div class="agent-progress-fill" id="agentProgressFill"></div>
+            </div>
+            <div class="agent-meta">
+              <span id="agentMeta">Sessions today: <strong id="agentSessionsToday">–</strong> / 10</span>
+              <button class="btn btn-ghost btn-sm" id="agentPauseBtn">Pause monitoring</button>
+            </div>
+          </section>
+
+          <section class="card" aria-labelledby="howTitle">
+            <h3 id="howTitle" class="card-title">How MindKey works</h3>
+            <ul class="how-list">
+              <li>
+                <span class="how-num">1</span>
+                <span><strong>Learns your baseline.</strong> MindKey watches how you usually type — speed, timing, rhythm — and builds a personal reference from your own sessions.</span>
+              </li>
+              <li>
+                <span class="how-num">2</span>
+                <span><strong>Notices change over time.</strong> It looks for patterns that persist across many sessions, not single unusual moments.</span>
+              </li>
+              <li>
+                <span class="how-num">3</span>
+                <span><strong>Combines signals.</strong> Typing behavior, how you say you're feeling, and any symptoms you report are considered together before anything is recommended.</span>
+              </li>
+            </ul>
+          </section>
         </div>
-        <div class="anomaly-legend">
-          <span>Normal</span>
-          <span>Persistent deviation</span>
+
+        <p class="smallprint">MindKey is a screening tool that looks for persistent changes in your own typing behavior over time. It does not diagnose dementia, Parkinson's disease, or any other condition.</p>
+      </section>
+
+      <!-- ================= TRENDS ================= -->
+      <section class="view" data-view="trends">
+        <div class="seg-row">
+          <div class="seg" role="group" aria-label="Time range" id="rangeSeg">
+            <button class="seg-btn active" data-range="7">7 days</button>
+            <button class="seg-btn" data-range="30">30 days</button>
+            <button class="seg-btn" data-range="90">90 days</button>
+          </div>
+          <div class="seg" role="group" aria-label="Metric" id="metricSeg">
+            <button class="seg-btn active" data-metric="speed">Speed</button>
+            <button class="seg-btn" data-metric="dwell">Dwell</button>
+            <button class="seg-btn" data-metric="flight">Flight</button>
+            <button class="seg-btn" data-metric="corrections">Corrections</button>
+            <button class="seg-btn" data-metric="pauses">Pauses</button>
+            <button class="seg-btn" data-metric="rhythm">Rhythm</button>
+          </div>
         </div>
-      </div>
 
-    </section>
-
-    <!-- Trend chart -->
-    <section class="card chart-card">
-      <div class="chart-card-header">
-        <div class="card-label">Typing Consistency Over Time</div>
-        <div class="chart-toggle">
-          <button class="chip active" data-metric="consistency">Consistency</button>
-          <button class="chip" data-metric="wpm">WPM</button>
-          <button class="chip" data-metric="dwell">Dwell</button>
-          <button class="chip" data-metric="flight">Flight</button>
-          <button class="chip" data-metric="pauses">Pauses</button>
+        <div class="card chart-card">
+          <div class="chart-head">
+            <div>
+              <h3 id="chartTitle">Typing speed</h3>
+              <p class="chart-sub" id="chartSub">Last 30 days · words per minute</p>
+            </div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="trendChart"></canvas>
+            <p class="chart-fallback" id="chartFallback" hidden>Charts need internet access to load Chart.js. Everything else works offline.</p>
+          </div>
+          <p class="chart-foot">The dashed line is your personal baseline — the pattern MindKey learned from your own sessions, not a universal average.</p>
         </div>
-      </div>
-      <canvas id="trendChart" height="110"></canvas>
-      <div class="chart-footnote">
-        Shaded region marks sessions flagged as a persistent deviation from the personal baseline, not a single unusual session.
-      </div>
-    </section>
 
-    <!-- Recent sessions -->
-    <section class="card sessions-card">
-      <div class="card-label">Recent Sessions</div>
-      <table class="sessions-table">
-        <thead>
-          <tr>
-            <th>Session</th>
-            <th>Date</th>
-            <th>WPM</th>
-            <th>Dwell (ms)</th>
-            <th>Flight (ms)</th>
-            <th>Pauses</th>
-            <th>Correction %</th>
-            <th>Anomaly</th>
-          </tr>
-        </thead>
-        <tbody id="sessionsTableBody">
-          <!-- populated by JS -->
-        </tbody>
-      </table>
-    </section>
+        <section class="card" aria-labelledby="whatChangedTitle">
+          <div class="card-head">
+            <h3 id="whatChangedTitle" class="card-title">What changed?</h3>
+            <span class="range-note" id="whatChangedRange">Last 30 days</span>
+          </div>
+          <ul class="change-list" id="changeList">
+            <li class="change-empty">No meaningful change detected in this period.</li>
+          </ul>
+          <p class="card-note">These observations describe typing behavior only. Many everyday factors — tiredness, stress, a new keyboard — can influence typing. MindKey treats a change as meaningful only when it persists over time and across several signals.</p>
+        </section>
+      </section>
 
-    <!-- Privacy controls -->
-    <section class="card privacy-card" id="privacySection">
-      <div class="card-label">Privacy &amp; Data Controls</div>
-      <ul class="privacy-list">
-        <li><span class="check">&#10003;</span> Only keystroke timing metadata is processed &mdash; never the actual characters typed.</li>
-        <li><span class="check">&#10003;</span> No message content, passwords, or clipboard data are ever stored.</li>
-        <li><span class="check">&#10003;</span> Data minimization: MindKey stores only the minimum behavioral features required by the model.</li>
-        <li><span class="check">&#10003;</span> You can pause or stop monitoring at any time from this dashboard.</li>
-        <li><span class="check">&#10003;</span> Application exclusions can be configured (e.g. exclude password managers).</li>
-        <li><span class="check">&#10003;</span> Processing happens locally on your device where possible.</li>
-      </ul>
-      <div class="privacy-actions">
-        <button class="btn btn-outline" id="pauseAgentBtn2">Pause monitoring</button>
-        <button class="btn btn-danger" id="deleteDataBtn">Delete all my data</button>
-      </div>
-    </section>
+      <!-- ================= SESSIONS ================= -->
+      <section class="view" data-view="sessions">
+        <div class="seg" role="group" aria-label="Session range" id="sessionRangeSeg">
+          <button class="seg-btn active" data-srange="all">All time</button>
+          <button class="seg-btn" data-srange="30">Last 30 days</button>
+          <button class="seg-btn" data-srange="7">Last 7 days</button>
+        </div>
+        <p class="sessions-count" id="sessionsCount"></p>
 
-  </main>
+        <div class="card table-card">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Duration</th>
+                <th class="num">Speed</th>
+                <th class="num">Dwell</th>
+                <th class="num">Flight</th>
+                <th class="num">Corrections</th>
+                <th class="num">Pauses</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="sessionsBody"></tbody>
+          </table>
+          <p class="empty-state" id="sessionsEmpty" hidden>No sessions in this period yet.</p>
+        </div>
+        <p class="smallprint">Sessions are collected automatically while you type normally — no typing-test website needed. Each session captures timing patterns only, never what you typed.</p>
+      </section>
+
+      <!-- ================= CHECK-INS ================= -->
+      <section class="view" data-view="checkins">
+        <div class="checkin-layout">
+          <div class="card checkin-card">
+            <p class="eyebrow">Wellbeing check-in</p>
+            <h3 class="card-title">How are you feeling today?</h3>
+            <p class="card-body">A quick answer helps MindKey understand whether anything everyday — like a late night or a stressful day — could explain a recent variation. There are no wrong answers.</p>
+            <div class="checkin-options" id="checkinOptions"></div>
+            <label class="field">
+              <span>Anything else you'd like to add? <em class="opt">(optional)</em></span>
+              <input type="text" id="checkinNote" maxlength="200" placeholder="e.g. a long work week, travelling, a new keyboard">
+            </label>
+            <button class="btn btn-primary" id="checkinSubmit">Save check-in</button>
+            <div class="context-note" id="checkinContext" hidden></div>
+          </div>
+
+          <aside class="card">
+            <h3 class="card-title">Why check in?</h3>
+            <p class="card-body">Typing can vary for many reasons. When a variation lines up with something you've told us about — stress, poor sleep, feeling unwell — MindKey treats it as <strong>contextualized</strong>: it stays in your history, but it's understood differently.</p>
+            <p class="card-body">A variation is only flagged as persistent when it remains unexplained across several sessions.</p>
+            <h3 class="card-title title-gap">Your check-in history</h3>
+            <ul class="checkin-history" id="checkinHistory">
+              <li class="empty-state">No check-ins yet.</li>
+            </ul>
+          </aside>
+        </div>
+      </section>
+
+      <!-- ================= SYMPTOM CHECK (flow step) ================= -->
+      <section class="view" data-view="symptoms">
+        <div class="symptom-intro">
+          <p class="eyebrow">A few additional questions</p>
+          <h3 class="card-title">We've noticed a persistent change</h3>
+          <p class="card-body">Your typing pattern has remained different from your usual baseline across multiple sessions. Persistent changes can have many possible explanations, including temporary factors, so we'd like to ask a few short questions before suggesting any next step.</p>
+          <p class="card-body muted-body">This is not a diagnostic questionnaire, and your answers never produce a diagnosis. They simply help MindKey and, if you choose, a healthcare professional understand your situation better.</p>
+        </div>
+
+        <div id="symptomGroups"></div>
+
+        <div class="symptom-footer">
+          <button class="btn btn-ghost" id="symptomBack">Back</button>
+          <button class="btn btn-primary" id="symptomSubmit">Continue to health insight</button>
+        </div>
+      </section>
+
+      <!-- ================= HEALTH INSIGHTS ================= -->
+      <section class="view" data-view="insights">
+        <div class="insight-head">
+          <p class="eyebrow">Health insight</p>
+          <h3 class="card-title">Your recent behavioral picture</h3>
+          <p class="card-body">MindKey combines three kinds of information before suggesting anything: your typing pattern, the context you've shared, and any symptoms you've reported.</p>
+        </div>
+
+        <div class="signal-grid" id="signalGrid">
+          <div class="card signal-card" data-signal="typing">
+            <p class="eyebrow">Typing pattern</p>
+            <p class="signal-text" id="signalTypingText">–</p>
+            <p class="signal-detail" id="signalTypingDetail"></p>
+          </div>
+          <div class="card signal-card" data-signal="wellbeing">
+            <p class="eyebrow">Wellbeing context</p>
+            <p class="signal-text" id="signalWellbeingText">–</p>
+            <p class="signal-detail" id="signalWellbeingDetail"></p>
+          </div>
+          <div class="card signal-card" data-signal="symptoms">
+            <p class="eyebrow">Symptoms</p>
+            <p class="signal-text" id="signalSymptomsText">–</p>
+            <p class="signal-detail" id="signalSymptomsDetail"></p>
+          </div>
+        </div>
+
+        <div class="card interpretation" id="interpretationCard">
+          <div class="interpretation-head">
+            <span class="pill pill-ok" id="interpretationPill">No notable concern</span>
+            <h3 id="interpretationTitle">Your pattern looks consistent</h3>
+          </div>
+          <p id="interpretationText">–</p>
+        </div>
+
+        <section class="card" aria-labelledby="whyTitle">
+          <h3 id="whyTitle" class="card-title">Why are we recommending this?</h3>
+          <ul class="why-list" id="whyList"></ul>
+          <p class="card-note">MindKey never presents a disease risk percentage. It compares you with your own baseline and combines multiple signals before suggesting a next step — and the next step is almost always simply talking to a professional.</p>
+        </section>
+
+        <div class="insight-actions">
+          <button class="btn btn-primary" id="insightCareBtn">Find professional support</button>
+          <button class="btn btn-ghost" id="insightTrendsBtn">View trends</button>
+        </div>
+        <p class="smallprint">This insight is not a medical diagnosis. It is an observation about your typing behavior over time, intended to support — never replace — a conversation with a qualified healthcare professional.</p>
+      </section>
+
+      <!-- ================= MEDICAL ASSISTANCE ================= -->
+      <section class="view" data-view="care">
+        <div class="care-head">
+          <div class="care-steps" id="careSteps">
+            <span class="care-step active">Specialty</span>
+            <span class="care-step">Provider</span>
+            <span class="care-step">Time</span>
+            <span class="care-step">Confirm</span>
+          </div>
+          <p class="care-note">Prototype flow — the providers and availability shown here are examples, not real appointments.</p>
+        </div>
+
+        <div id="careContent"></div>
+
+        <p class="smallprint">If you're concerned about changes in your health, the most direct next step is to contact your usual doctor. MindKey is here to help you start that conversation with more context — it does not replace medical advice.</p>
+      </section>
+
+      <!-- ================= PRIVACY ================= -->
+      <section class="view" data-view="privacy">
+        <div class="privacy-cols">
+          <div class="card">
+            <h3 class="card-title">What MindKey collects</h3>
+            <ul class="privacy-list privacy-list-good">
+              <li>Typing timing and rhythm — dwell time, flight time, speed, pauses, corrections</li>
+              <li>When sessions happen and how long they last</li>
+              <li>Aggregated behavioral metrics built from those sessions</li>
+              <li>Check-in responses, if you choose to give them</li>
+              <li>Symptom responses, only if you complete the optional questionnaire</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3 class="card-title">What MindKey never needs</h3>
+            <ul class="privacy-list privacy-list-bad">
+              <li>The content of what you type — messages, documents, or code</li>
+              <li>Passwords or anything entered into a password field</li>
+              <li>Private conversation text in any app</li>
+              <li>The words themselves — only the timing between key presses matters</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="card processing-card">
+          <h3 class="card-title">Where processing happens</h3>
+          <p class="card-body">The desktop agent extracts typing features <strong>locally on your device</strong> and only timing-derived aggregates are sent to the server. The words you type never leave your computer. Planned: run more of the analysis — including anomaly detection — entirely on-device.</p>
+        </div>
+
+        <section class="card" aria-labelledby="controlsTitle">
+          <h3 id="controlsTitle" class="card-title">Your controls</h3>
+          <ul class="control-list">
+            <li class="control-item">
+              <div>
+                <p class="control-name">Pause monitoring</p>
+                <p class="control-desc">Stop the agent from collecting new sessions. You can resume anytime.</p>
+              </div>
+              <span class="pill pill-planned" id="privacyPausePill">Active</span>
+              <button class="btn btn-ghost btn-sm" id="privacyPauseBtn">Pause</button>
+            </li>
+            <li class="control-item">
+              <div>
+                <p class="control-name">View collected data</p>
+                <p class="control-desc">See exactly what MindKey stores about you, in plain form.</p>
+              </div>
+              <span class="pill pill-planned">Active</span>
+              <button class="btn btn-ghost btn-sm" id="viewDataBtn">View</button>
+            </li>
+            <li class="control-item">
+              <div>
+                <p class="control-name">Application exclusions</p>
+                <p class="control-desc">Skip monitoring in specific apps, such as password managers or banking.</p>
+              </div>
+              <span class="pill pill-demo">Planned</span>
+              <button class="btn btn-ghost btn-sm" id="exclusionsBtn">Configure</button>
+            </li>
+            <li class="control-item">
+              <div>
+                <p class="control-name">Delete all my data</p>
+                <p class="control-desc">Permanently remove every stored session, check-in, and symptom response.</p>
+              </div>
+              <span class="pill pill-demo">Demo only</span>
+              <button class="btn btn-danger btn-sm" id="deleteDataBtn">Delete</button>
+            </li>
+          </ul>
+          <p class="card-note">"Active" controls work in the current prototype. "Demo only" changes local demo data and notes what the backend must support for production. "Planned" features are designed but not yet implemented.</p>
+        </section>
+
+        <p class="smallprint">MindKey is designed around data minimization: it stores only the minimum behavioral features the model needs, never your typed content. You can delete everything at any time.</p>
+      </section>
+
+      <!-- ================= SETTINGS ================= -->
+      <section class="view" data-view="settings">
+        <div class="settings-layout">
+          <div class="card">
+            <h3 class="card-title">Profile</h3>
+            <div class="profile-row">
+              <span class="avatar" id="avatarInitials">DU</span>
+              <div>
+                <p class="profile-name" id="profileName">Demo user</p>
+                <p class="control-desc" id="profileId">demo-user-1</p>
+              </div>
+            </div>
+            <p class="card-note">In the full product, this profile would connect to your MindKey account and the monitoring agent on your device.</p>
+          </div>
+
+          <div class="card" id="demoCard">
+            <h3 class="card-title">Demo data</h3>
+            <p class="card-body">MindKey is currently running on simulated data so the full product experience can be explored without a connected backend.</p>
+            <label class="field">
+              <span>Scenario</span>
+              <select id="settingsScenarioSelect">
+                <option value="consistent">Consistent pattern</option>
+                <option value="variation">Recent variation</option>
+                <option value="persistent">Persistent change</option>
+              </select>
+            </label>
+            <div class="btn-row">
+              <button class="btn btn-ghost btn-sm" id="regenerateBtn">Regenerate data</button>
+              <button class="btn btn-ghost btn-sm" id="resetDemoBtn">Reset demo data</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 class="card-title">Data source</h3>
+            <ul class="data-source-list">
+              <li><span class="dot dot-ok"></span>Simulated demo data <span class="opt">(active)</span></li>
+              <li><span class="dot dot-muted"></span>MindKey backend API <span class="opt">(ready to connect — set <code>API_BASE</code> in <code>data.js</code>)</span></li>
+            </ul>
+          </div>
+
+          <div class="card">
+            <h3 class="card-title">About</h3>
+            <p class="card-body">MindKey is an AI-powered early-warning prototype that studies everyday typing patterns to notice persistent behavioral change. It is a research prototype, not a medical device, and it never diagnoses disease.</p>
+            <p class="control-desc">Version 0.2 · Frontend redesign</p>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
 </div>
 
+<!-- Data viewer dialog -->
+<dialog class="dialog" id="dataDialog">
+  <div class="dialog-head">
+    <h3 class="card-title">Your collected data</h3>
+    <button class="icon-btn" id="dataDialogClose" aria-label="Close">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5.5 5.5 9 9M14.5 5.5l-9 9"/></svg>
+    </button>
+  </div>
+  <p class="control-desc">Everything MindKey stores for you — shown here as it would be sent to or read from the backend.</p>
+  <pre class="data-dump" id="dataDump"></pre>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="data.js"></script>
 <script src="app.js"></script>
 </body>
-</html>
+</html>
