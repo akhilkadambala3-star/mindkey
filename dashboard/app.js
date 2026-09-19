@@ -61,7 +61,7 @@ const METRICS = {
   },
   rhythm: {
     label: "Rhythm variability",
-    unit: "",
+    unit: "s",
     get: (s) => s.rhythm_variability,
     base: (b) => Math.round(b.rhythm_variability * 100) / 100,
   },
@@ -139,6 +139,36 @@ function mean(arr) {
   return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
 }
 
+const isNumber = (v) => typeof v === "number" && Number.isFinite(v);
+
+/**
+ * Baseline accessors. The dashboard must never assume a baseline (or a given
+ * baseline metric) exists: an empty history, an unconnected backend or a
+ * partial payload must degrade gracefully instead of throwing.
+ */
+function baselineValue(key) {
+  return App.baseline && isNumber(App.baseline[key]) ? App.baseline[key] : null;
+}
+
+const prefersReducedMotion = () =>
+  typeof window.matchMedia === "function" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/**
+ * Loading affordance for refreshes. Demo data resolves instantly, so this is
+ * deliberately cheap (a body class plus a busy refresh button); it never
+ * blocks rendering if something goes wrong.
+ */
+function setLoading(on) {
+  const busy = !!on;
+  document.body.classList.toggle("is-loading", busy);
+  const btn = $("refreshBtn");
+  if (btn) {
+    btn.disabled = busy;
+    btn.setAttribute("aria-busy", busy ? "true" : "false");
+  }
+}
+
 // Human noun forms for check-in factors, so sentences read naturally.
 const CONTEXT_NOUNS = {
   feeling_well: "feeling well",
@@ -151,9 +181,21 @@ const CONTEXT_NOUNS = {
 };
 
 const STATUS_META = {
-  normal: { label: "Consistent", pill: "pill-ok" },
-  elevated: { label: "Variation", pill: "pill-warn" },
-  flagged: { label: "Change", pill: "pill-alert" },
+  normal: {
+    label: "Consistent",
+    pill: "pill-ok",
+    help: "This session stayed close to your personal baseline.",
+  },
+  elevated: {
+    label: "Variation",
+    pill: "pill-warn",
+    help: "This session differed from your personal baseline, but not enough to conclude anything.",
+  },
+  flagged: {
+    label: "Change",
+    pill: "pill-alert",
+    help: "This session contributed to a persistent change — several indicators shifted together.",
+  },
 };
 
 /* --------------------------------------------------------------------------
@@ -242,13 +284,24 @@ function describeChanges(sessions, rangeDays) {
    Router
    -------------------------------------------------------------------------- */
 
+let firstRender = true;
+
 function setView(name) {
   if (!VIEW_META[name]) name = "home";
   App.lastView = App.view;
   App.view = name;
 
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.dataset.view === name));
-  document.querySelectorAll(".nav-item").forEach((n) => n.classList.toggle("active", n.dataset.view === name));
+  document.querySelectorAll(".nav-item").forEach((n) => {
+    const active = n.dataset.view === name;
+    n.classList.toggle("active", active);
+    // aria-current keeps screen readers on the same page as the visuals.
+    if (active) {
+      n.setAttribute("aria-current", "page");
+    } else {
+      n.removeAttribute("aria-current");
+    }
+  });
 
   const [title, subtitle] = VIEW_META[name];
   $("pageTitle").textContent = title;
@@ -267,6 +320,16 @@ function setView(name) {
   };
   renderers[name]();
   window.scrollTo({ top: 0 });
+
+  // Move focus to the new view's heading so keyboard and screen-reader users
+  // are not left behind in the old view. Skipped on first paint.
+  if (!firstRender) {
+    const heading = $("pageTitle");
+    if (heading && typeof heading.focus === "function") {
+      heading.focus({ preventScroll: true });
+    }
+  }
+  firstRender = false;
 }
 
 /* --------------------------------------------------------------------------
@@ -291,7 +354,7 @@ function agentLine() {
     case "paused":
       return "Monitoring is paused. Nothing is being collected right now.";
     case "limit":
-      return "You've reached the daily analysis limit of 10 sessions. Monitoring resumes tomorrow.";
+      return `You've reached the simulated daily limit of ${AGENT_DAILY_SESSION_LIMIT} sessions. Monitoring resumes tomorrow.`;
     default:
       return "MindKey listens for your next typing activity.";
   }
@@ -324,11 +387,20 @@ function renderAgent() {
   $("agentSessionsToday").textContent = a.sessionCountToday;
 
   if (a.state === "session") {
+    const pct = Math.max(
+      0,
+      Math.min(100, (1 - a.sessionRemaining / a.sessionDuration) * 100)
+    );
     progress.hidden = false;
-    $("agentProgressFill").style.width =
-      ((1 - a.sessionRemaining / a.sessionDuration) * 100).toFixed(1) + "%";
+    progress.setAttribute("role", "progressbar");
+    progress.setAttribute("aria-label", "Simulated typing session progress");
+    progress.setAttribute("aria-valuemin", "0");
+    progress.setAttribute("aria-valuemax", "100");
+    progress.setAttribute("aria-valuenow", String(Math.round(pct)));
+    $("agentProgressFill").style.width = pct.toFixed(1) + "%";
   } else {
     progress.hidden = true;
+    progress.removeAttribute("aria-valuenow");
   }
 
   // Pause button (home + privacy)
@@ -337,8 +409,11 @@ function renderAgent() {
   $("privacyPauseBtn").textContent = pauseLabel;
   $("privacyPausePill").textContent = a.state === "paused" ? "Paused" : "Active";
 
-  // Today tile
+  // Today tile + the daily-limit copy. Both read the one mirrored constant so
+  // the tile, the agent card and the limit message can never drift apart.
   $("todaySessions").textContent = a.sessionCountToday;
+  $("todaySessionsLimit").textContent = AGENT_DAILY_SESSION_LIMIT;
+  $("agentSessionsLimit").textContent = AGENT_DAILY_SESSION_LIMIT;
 }
 
 function agentPauseToggle() {
@@ -365,8 +440,10 @@ function agentBeginSession() {
   const a = App.agent;
   if (a.state === "paused" || a.state === "limit") return;
   a.state = "session";
-  a.sessionDuration = 14; // demo: a session lasts 14 s so the countdown is visible
-  a.sessionRemaining = 14;
+  // Mirrors the real agent's session length (agent/listener.py) so the demo
+  // shows the true 20-second window instead of an invented duration.
+  a.sessionDuration = AGENT_SESSION_DURATION_S;
+  a.sessionRemaining = AGENT_SESSION_DURATION_S;
   renderAgent();
 
   const tick = setInterval(() => {
@@ -384,7 +461,7 @@ function agentBeginSession() {
 function agentEndSession() {
   const a = App.agent;
   a.sessionCountToday += 1;
-  if (a.sessionCountToday >= 10) {
+  if (a.sessionCountToday >= AGENT_DAILY_SESSION_LIMIT) {
     a.state = "limit";
     renderAgent();
     showToast("Daily analysis limit reached for the demo — monitoring resumes tomorrow.");
@@ -409,6 +486,7 @@ function agentResetDay() {
   renderAgent();
   agentSchedule();
 }
+
 
 /* --------------------------------------------------------------------------
    Home
@@ -468,15 +546,36 @@ function renderHome() {
       <button class="btn btn-ghost" data-nav="insights">View health insight</button>`;
   }
 
-  // Today snapshot
+  // Today snapshot — tolerant of an empty day, a missing baseline, or a
+  // payload that omits a feature. None of these may break the dashboard.
   const today = App.sessions.filter((s) => isTodayISO(s.session_start));
-  $("todayConsistency").textContent = today.length ? Math.round(mean(today.map((s) => s.consistency))) : "–";
-  const speed = today.length ? Math.round(mean(today.map((s) => s.wpm))) : null;
-  const dwell = today.length ? Math.round(mean(today.map((s) => s.dwell_mean_ms))) : null;
+  const consistencyValues = today.map((s) => s.consistency).filter(isNumber);
+  const speedValues = today.map((s) => s.wpm).filter(isNumber);
+  const dwellValues = today.map((s) => s.dwell_mean_ms).filter(isNumber);
+  const speed = speedValues.length ? Math.round(mean(speedValues)) : null;
+  const dwell = dwellValues.length ? Math.round(mean(dwellValues)) : null;
+
+  const baseWpm = baselineValue("wpm");
+  const baseDwellSeconds = baselineValue("dwell_mean");
+  const baseDwell = baseDwellSeconds == null ? null : Math.round(baseDwellSeconds * 1000);
+
+  $("todayConsistency").textContent = consistencyValues.length
+    ? Math.round(mean(consistencyValues))
+    : "–";
   $("todaySpeed").textContent = speed ?? "–";
   $("todayDwell").textContent = dwell ?? "–";
-  $("todaySpeedSub").textContent = speed != null ? vsBaseline(speed, App.baseline.wpm, "wpm") : "no sessions yet";
-  $("todayDwellSub").textContent = dwell != null ? vsBaseline(dwell, Math.round(App.baseline.dwell_mean * 1000), "ms") : "no sessions yet";
+  $("todaySpeedSub").textContent =
+    speed == null
+      ? "no sessions today yet"
+      : baseWpm == null
+        ? "no baseline yet"
+        : vsBaseline(speed, baseWpm, "wpm");
+  $("todayDwellSub").textContent =
+    dwell == null
+      ? "no sessions today yet"
+      : baseDwell == null
+        ? "no baseline yet"
+        : vsBaseline(dwell, baseDwell, "ms");
 
   renderAgent();
 }
@@ -490,22 +589,39 @@ function vsBaseline(value, base, unit) {
 
 /** Human list of what changed vs. the personal baseline (persistent state). */
 function observedChanges() {
-  const b = App.baseline;
   const recent = App.sessions.slice(-5);
-  const m = (key) => mean(recent.map((s) => s[key]));
+  if (!App.baseline || !recent.length) {
+    return ["Several typing metrics have shifted from your personal baseline"];
+  }
+
+  // mean() of an empty/filtered list is 0, which would read as "slower than
+  // usual", so every value is filtered to real numbers first and every
+  // comparison is skipped when its baseline metric is missing.
+  const m = (key) => mean(recent.map((s) => s[key]).filter(isNumber));
   const items = [];
-  const speed = m("wpm");
-  if (speed < b.wpm * 0.94) items.push("Slower typing than your usual pace");
-  const dwell = m("dwell_mean_ms");
-  if (dwell > b.dwell_mean * 1000 * 1.06) items.push("Keys held slightly longer than usual");
-  const flight = m("flight_mean_ms");
-  if (flight > b.flight_mean * 1000 * 1.06) items.push("Longer gaps between keys");
-  const pauses = m("pause_count");
-  if (pauses > b.pause_count * 1.2) items.push("More pauses while typing");
-  const corr = m("correction_rate");
-  if (corr > b.correction_rate * 1.15) items.push("More corrections than usual");
-  const rhythm = m("rhythm_variability");
-  if (rhythm > b.rhythm_variability * 1.12) items.push("Less even typing rhythm");
+
+  const bWpm = baselineValue("wpm");
+  if (bWpm != null && m("wpm") < bWpm * 0.94) items.push("Slower typing than your usual pace");
+
+  const bDwell = baselineValue("dwell_mean");
+  if (bDwell != null && m("dwell_mean_ms") > bDwell * 1000 * 1.06)
+    items.push("Keys held slightly longer than usual");
+
+  const bFlight = baselineValue("flight_mean");
+  if (bFlight != null && m("flight_mean_ms") > bFlight * 1000 * 1.06)
+    items.push("Longer gaps between keys");
+
+  const bPauses = baselineValue("pause_count");
+  if (bPauses != null && m("pause_count") > bPauses * 1.2) items.push("More pauses while typing");
+
+  const bCorr = baselineValue("correction_rate");
+  if (bCorr != null && m("correction_rate") > bCorr * 1.15)
+    items.push("More corrections than usual");
+
+  const bRhythm = baselineValue("rhythm_variability");
+  if (bRhythm != null && m("rhythm_variability") > bRhythm * 1.12)
+    items.push("Less even typing rhythm");
+
   return items.length ? items : ["Several typing metrics have shifted from your personal baseline"];
 }
 
@@ -517,10 +633,50 @@ function metricSeries(sessions, metric) {
   return sessions.map(metric.get);
 }
 
+/*
+  Chart teardown helper. Every exit path calls it, so a chart from a previous
+  range/scenario can never be left behind on the canvas when the current
+  window has too little data or Chart.js is unavailable.
+*/
+function destroyChart() {
+  if (App.chart) {
+    App.chart.destroy();
+    App.chart = null;
+  }
+}
+
+/* Human names for the axis units, so the chart subtitle never reads as a bare
+   symbol ("ms" → "milliseconds"). */
+const UNIT_LABELS = {
+  wpm: "words per minute",
+  ms: "milliseconds",
+  "%": "percent of keystrokes",
+  s: "seconds (standard deviation)",
+  "": "count per session",
+};
+
+/* Text equivalent of the chart, announced to screen readers. */
+function setChartSummary(sessions, metric, base) {
+  const el = $("chartSummary");
+  if (!el) return;
+  if (!sessions || !sessions.length) {
+    el.textContent = "No chart data for this period.";
+    return;
+  }
+  const unit = metric.unit ? ` ${metric.unit}` : "";
+  const latest = metric.get(sessions[sessions.length - 1]);
+  const parts = [
+    `${sessions.length} sessions in the last ${App.range} days.`,
+    `Latest ${metric.label.toLowerCase()}: ${latest}${unit}.`,
+  ];
+  if (isNumber(base)) parts.push(`Your baseline: ${base}${unit}.`);
+  el.textContent = parts.join(" ");
+}
+
 function renderTrends() {
   const metric = METRICS[App.metric];
   $("chartTitle").textContent = metric.label;
-  $("chartSub").textContent = `Last ${App.range} days · ${metric.unit || metric.label.toLowerCase()}`;
+  $("chartSub").textContent = `Last ${App.range} days · ${UNIT_LABELS[metric.unit] || metric.label.toLowerCase()}`;
   $("whatChangedRange").textContent = `Last ${App.range} days`;
 
   // What changed? — data-driven, independent of charts.
@@ -532,66 +688,89 @@ function renderTrends() {
     list.innerHTML = changes.map((c) => `<li class="change-warn">${c.text}</li>`).join("");
   }
 
-  // Chart
-  const window = App.sessions.slice(-App.range);
-  if (!App.chartOk) {
-    $("chartFallback").hidden = false;
-    return;
-  }
-  if (window.length < 2) {
-    $("chartFallback").hidden = false;
-    $("chartFallback").textContent = "Not enough sessions yet to draw a chart.";
-    return;
-  }
-  $("chartFallback").hidden = true;
+  // Chart. Every exit path tears the previous chart down first.
+  const chartWindow = App.sessions.slice(-App.range);
+  const fallback = $("chartFallback");
 
-  const labels = window.map((s) => fmtDay(s.session_start));
-  const data = metricSeries(window, metric);
-  const baseline = Array(window.length).fill(metric.base(App.baseline));
+  if (!App.chartOk) {
+    destroyChart();
+    fallback.textContent =
+      "Charts need internet access to load Chart.js. Everything else works offline.";
+    fallback.hidden = false;
+    setChartSummary([], metric, null);
+    return;
+  }
+
+  if (chartWindow.length < 2) {
+    destroyChart();
+    fallback.textContent = "Not enough sessions yet to draw a chart.";
+    fallback.hidden = false;
+    setChartSummary([], metric, null);
+    return;
+  }
+
+  fallback.hidden = true;
+
+  const labels = chartWindow.map((s) => fmtDay(s.session_start));
+  const data = metricSeries(chartWindow, metric);
+  // A missing/partial baseline simply means no dashed reference line.
+  const base = App.baseline ? metric.base(App.baseline) : null;
+  const baseline = isNumber(base) ? Array(chartWindow.length).fill(base) : null;
 
   App.chart = buildChart({
+    sessions: chartWindow,
     labels,
     data,
     baseline,
     unit: metric.unit,
     color: "#2F6B4F",
   });
+  setChartSummary(chartWindow, metric, base);
 }
 
-function buildChart({ labels, data, baseline, unit, color }) {
-  if (App.chart) App.chart.destroy();
+function buildChart({ sessions, labels, data, baseline, unit, color }) {
+  destroyChart();
   const ctx = $("trendChart");
+  ctx.setAttribute("role", "img");
+  ctx.setAttribute(
+    "aria-label",
+    `${METRICS[App.metric].label} over the last ${App.range} days, compared with your personal baseline.`
+  );
+
+  const datasets = [
+    {
+      label: "Sessions",
+      data,
+      borderColor: color,
+      backgroundColor: "rgba(47, 107, 79, 0.05)",
+      borderWidth: 2,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      pointHoverBackgroundColor: color,
+      tension: 0.3,
+      fill: true,
+    },
+  ];
+  // The dashed baseline reference exists only when a baseline exists.
+  if (baseline) {
+    datasets.push({
+      label: "Your baseline",
+      data: baseline,
+      borderColor: "#B9B4A9",
+      borderWidth: 1.5,
+      borderDash: [5, 5],
+      pointRadius: 0,
+      fill: false,
+    });
+  }
+
   return new Chart(ctx, {
     type: "line",
-    data: {
-      labels,
-      datasets: [
-        {
-          label: "Sessions",
-          data,
-          borderColor: color,
-          backgroundColor: "rgba(47, 107, 79, 0.05)",
-          borderWidth: 2,
-          pointRadius: 0,
-          pointHoverRadius: 4,
-          pointHoverBackgroundColor: color,
-          tension: 0.3,
-          fill: true,
-        },
-        {
-          label: "Your baseline",
-          data: baseline,
-          borderColor: "#B9B4A9",
-          borderWidth: 1.5,
-          borderDash: [5, 5],
-          pointRadius: 0,
-          fill: false,
-        },
-      ],
-    },
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      animation: prefersReducedMotion() ? false : undefined,
       interaction: { intersect: false, mode: "index" },
       plugins: {
         legend: { display: false },
@@ -606,7 +785,9 @@ function buildChart({ labels, data, baseline, unit, color }) {
           displayColors: false,
           callbacks: {
             title: (items) => {
-              const s = windowSessions()[items[0].dataIndex];
+              // Read the exact window that was rendered, not a fresh slice of
+              // application state.
+              const s = sessions[items[0].dataIndex];
               return s ? `${fmtFull(s.session_start)} · ${fmtTime(s.session_start)}` : "";
             },
             label: (item) => {
@@ -636,10 +817,6 @@ function buildChart({ labels, data, baseline, unit, color }) {
   });
 }
 
-function windowSessions() {
-  return App.sessions.slice(-App.range);
-}
-
 /* --------------------------------------------------------------------------
    Sessions
    -------------------------------------------------------------------------- */
@@ -653,10 +830,11 @@ function renderSessions() {
     list = list.filter((s) => new Date(s.session_start) >= cutoff);
   }
 
+  const count = `${list.length} session${list.length === 1 ? "" : "s"}`;
   $("sessionsCount").textContent =
     days === 0
-      ? `${list.length} sessions recorded${demoMode() ? " (demo data)" : ""}`
-      : `${list.length} sessions in the last ${days} days`;
+      ? `${count} recorded${demoMode() ? " (simulated demo data)" : ""}`
+      : `${count} in the last ${days} days`;
 
   const tbody = $("sessionsBody");
   tbody.innerHTML = "";
@@ -666,14 +844,14 @@ function renderSessions() {
     const status = STATUS_META[s.status] || STATUS_META.normal;
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td class="td-main">${fmtFull(s.session_start)}<br><span class="opt">${fmtTime(s.session_start)}</span></td>
-      <td>${fmtDuration(s.duration_s)}</td>
-      <td class="num">${s.wpm} <span class="opt">wpm</span></td>
-      <td class="num">${s.dwell_mean_ms} <span class="opt">ms</span></td>
-      <td class="num">${s.flight_mean_ms} <span class="opt">ms</span></td>
-      <td class="num">${Math.round(s.correction_rate * 100)}%</td>
-      <td class="num">${s.pause_count}</td>
-      <td><span class="pill ${status.pill}">${status.label}</span></td>`;
+      <td class="td-main" data-label="Date">${fmtFull(s.session_start)}<br><span class="opt">${fmtTime(s.session_start)}</span></td>
+      <td data-label="Duration">${isNumber(s.duration_s) ? fmtDuration(s.duration_s) : "—"}</td>
+      <td class="num" data-label="Speed">${isNumber(s.wpm) ? `${s.wpm} <span class="opt">wpm</span>` : "—"}</td>
+      <td class="num" data-label="Dwell">${isNumber(s.dwell_mean_ms) ? `${s.dwell_mean_ms} <span class="opt">ms</span>` : "—"}</td>
+      <td class="num" data-label="Flight">${isNumber(s.flight_mean_ms) ? `${s.flight_mean_ms} <span class="opt">ms</span>` : "—"}</td>
+      <td class="num" data-label="Corrections">${isNumber(s.correction_rate) ? `${Math.round(s.correction_rate * 100)}%` : "—"}</td>
+      <td class="num" data-label="Pauses">${isNumber(s.pause_count) ? s.pause_count : "—"}</td>
+      <td data-label="Status"><span class="pill ${status.pill}" title="${status.help}">${status.label}</span></td>`;
     tbody.appendChild(tr);
   }
 }
@@ -692,9 +870,15 @@ function renderCheckins() {
   ).join("");
 
   wrap.querySelectorAll(".checkin-opt").forEach((btn) => {
+    btn.setAttribute("role", "radio");
+    btn.setAttribute("aria-checked", "false");
     btn.addEventListener("click", () => {
-      wrap.querySelectorAll(".checkin-opt").forEach((b) => b.classList.remove("selected"));
+      wrap.querySelectorAll(".checkin-opt").forEach((b) => {
+        b.classList.remove("selected");
+        b.setAttribute("aria-checked", "false");
+      });
       btn.classList.add("selected");
+      btn.setAttribute("aria-checked", "true");
       App.checkin.selected = btn.dataset.factor;
     });
   });
@@ -762,7 +946,12 @@ async function submitCheckinFlow() {
 }
 
 function wrapClearSelection() {
-  $("checkinOptions").querySelectorAll(".checkin-opt").forEach((b) => b.classList.remove("selected"));
+  $("checkinOptions")
+    .querySelectorAll(".checkin-opt")
+    .forEach((b) => {
+      b.classList.remove("selected");
+      b.setAttribute("aria-checked", "false");
+    });
 }
 
 /* --------------------------------------------------------------------------
@@ -781,10 +970,10 @@ function renderSymptoms() {
               (item) => `
               <div class="symptom-row">
                 <span class="symptom-label">${item.label}</span>
-                <div class="freq-seg" data-symptom="${item.id}">
-                  <button class="freq-btn selected" data-freq="none">Not at all</button>
-                  <button class="freq-btn" data-freq="sometimes">Sometimes</button>
-                  <button class="freq-btn" data-freq="often">Often</button>
+                <div class="freq-seg" data-symptom="${item.id}" role="radiogroup" aria-label="${item.label}">
+                  <button class="freq-btn selected" data-freq="none" role="radio" aria-checked="true">Not at all</button>
+                  <button class="freq-btn" data-freq="sometimes" role="radio" aria-checked="false">Sometimes</button>
+                  <button class="freq-btn" data-freq="often" role="radio" aria-checked="false">Often</button>
                 </div>
               </div>`
             )
@@ -799,8 +988,10 @@ function renderSymptoms() {
       btn.addEventListener("click", () => {
         seg.querySelectorAll(".freq-btn").forEach((b) => {
           b.classList.remove("selected", "sel-warn", "sel-alert");
+          b.setAttribute("aria-checked", "false");
         });
         btn.classList.add("selected");
+        btn.setAttribute("aria-checked", "true");
         if (btn.dataset.freq === "sometimes") btn.classList.add("sel-warn");
         if (btn.dataset.freq === "often") btn.classList.add("sel-alert");
       });
@@ -1184,6 +1375,31 @@ function renderSettings() {
   $("scenarioSelect").value = DemoState.scenario;
   $("demoCard").hidden = !demoMode();
   $("demoSelectWrap").style.display = demoMode() ? "inline-flex" : "none";
+  renderDemoBadge();
+  renderDataSource();
+}
+
+/** "Demo data" indicator — visible exactly when the dashboard is simulated. */
+function renderDemoBadge() {
+  const badge = $("demoBadge");
+  if (badge) badge.hidden = !demoMode();
+}
+
+/**
+ * Honest data-source status. The dashboard runs on simulated data until the
+ * backend exposes read endpoints, so the Settings card must say so and must
+ * not imply that live sessions are being displayed.
+ */
+function renderDataSource() {
+  const live = !demoMode();
+  const demoDot = $("dataSourceDemoDot");
+  const apiDot = $("dataSourceApiDot");
+  if (!demoDot || !apiDot) return;
+
+  demoDot.className = "dot " + (live ? "dot-muted" : "dot-ok");
+  $("dataSourceDemoOpt").textContent = live ? "(inactive)" : "(active)";
+  apiDot.className = "dot " + (live ? "dot-ok" : "dot-muted");
+  $("dataSourceApiOpt").textContent = live ? "(active)" : "(not connected)";
 }
 
 /* --------------------------------------------------------------------------
@@ -1200,27 +1416,45 @@ function applyScenario(key) {
 }
 
 async function refreshData() {
-  const [sessions, baseline] = await Promise.all([getSessions(), getBaseline()]);
-  App.sessions = sessions;
-  App.baseline = baseline;
-  const renderers = {
-    home: renderHome,
-    trends: renderTrends,
-    sessions: renderSessions,
-    checkins: renderCheckins,
-    symptoms: renderSymptoms,
-    insights: renderInsights,
-    care: renderCare,
-    privacy: renderPrivacy,
-    settings: renderSettings,
-  };
-  renderers[App.view]();
-  showToast(demoMode() ? "Demo data refreshed." : "Data refreshed.");
+  setLoading(true);
+  try {
+    const [sessions, baseline] = await Promise.all([getSessions(), getBaseline()]);
+    App.sessions = Array.isArray(sessions) ? sessions : [];
+    App.baseline = baseline || null;
+    const renderers = {
+      home: renderHome,
+      trends: renderTrends,
+      sessions: renderSessions,
+      checkins: renderCheckins,
+      symptoms: renderSymptoms,
+      insights: renderInsights,
+      care: renderCare,
+      privacy: renderPrivacy,
+      settings: renderSettings,
+    };
+    renderers[App.view]();
+    renderDemoBadge();
+    showToast(demoMode() ? "Demo data refreshed." : "Data refreshed.");
+  } catch (err) {
+    // A failed refresh must never leave the dashboard in a broken state.
+    showToast("Could not load new data. The current view is unchanged — try again.");
+  } finally {
+    setLoading(false);
+  }
 }
 
 /* --------------------------------------------------------------------------
    Wiring
    -------------------------------------------------------------------------- */
+
+/** Keep aria-pressed in sync with the visual .active state of a segmented control. */
+function syncSegPressed(segId) {
+  const seg = $(segId);
+  if (!seg) return;
+  seg.querySelectorAll(".seg-btn").forEach((b) => {
+    b.setAttribute("aria-pressed", b.classList.contains("active") ? "true" : "false");
+  });
+}
 
 function wire() {
   // Navigation
@@ -1250,6 +1484,7 @@ function wire() {
       App.range = Number(btn.dataset.range);
       document.querySelectorAll("#rangeSeg .seg-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
+      syncSegPressed("rangeSeg");
       renderTrends();
     });
   });
@@ -1258,6 +1493,7 @@ function wire() {
       App.metric = btn.dataset.metric;
       document.querySelectorAll("#metricSeg .seg-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
+      syncSegPressed("metricSeg");
       renderTrends();
     });
   });
@@ -1268,9 +1504,15 @@ function wire() {
       App.sessionRange = btn.dataset.srange;
       document.querySelectorAll("#sessionRangeSeg .seg-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
+      syncSegPressed("sessionRangeSeg");
       renderSessions();
     });
   });
+
+  // Segmented controls start with aria-pressed matching their .active button.
+  syncSegPressed("rangeSeg");
+  syncSegPressed("metricSeg");
+  syncSegPressed("sessionRangeSeg");
 
   // Agent
   $("agentPauseBtn").addEventListener("click", agentPauseToggle);

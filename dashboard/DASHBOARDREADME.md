@@ -45,6 +45,24 @@ across reloads. "Delete all my data" clears them. The agent-status card
 simulates the real agent lifecycle (waiting → analyzing with countdown →
 uploading → daily limit) so the states the product will show are visible now.
 
+Because the dashboard is simulated, a **Demo data** chip is shown in the
+topbar whenever demo mode is active, the Monitoring card is labelled
+**Simulated**, and Settings → Data source explains that live read endpoints are
+not connected yet. Nothing in demo mode claims to be real collected data.
+
+The agent simulator mirrors the real desktop agent instead of inventing its
+own numbers. Two constants at the top of `data.js` are the single frontend
+source of truth for the simulator *and* for every piece of daily-limit copy:
+
+```js
+const AGENT_SESSION_DURATION_S = 20;   // mirrors SESSION_DURATION_S in agent/listener.py
+const AGENT_DAILY_SESSION_LIMIT = 100; // mirrors DAILY_SESSION_LIMIT in agent/listener.py
+```
+
+A simulated session therefore lasts **20 seconds** and the daily limit is
+**100 sessions**, exactly like the agent. Those two values are never
+hard-coded again in the UI.
+
 Everything is labeled honestly: controls that exist are marked **Active**,
 demo-only behavior is marked **Demo only**, and unimplemented features are
 marked **Planned**.
@@ -56,6 +74,16 @@ In `data.js` set:
 ```js
 const API_BASE = "http://localhost:8000"; // was null
 ```
+
+Two things must exist before that switch is useful:
+
+1. **The read endpoints below** — the backend currently exposes only POST
+   `/typing/session`, POST `/baseline/{user_id}`, GET `/health` and GET
+   `/supabase-test`.
+2. **Browser CORS access on the backend.** It sends no CORS headers today, so a
+   dashboard served from `:5500` cannot call it on `:8000`. Adding CORS
+   middleware is a backend change and is outside the scope of the frontend
+   work.
 
 The UI never changes — every function in the data layer already branches on
 `API_BASE`. The backend currently exposes only `POST /typing/session`,
@@ -87,8 +115,14 @@ dashboard stays in demo mode, which is intentional.
 ]
 ```
 
-`status` is one of `"normal"` / `"elevated"` / `"flagged"` (from the backend's
-Isolation Forest + persistence logic, never computed by the frontend).
+`status` is one of `"normal"` / `"elevated"` / `"flagged"` and is *intended* to
+come from the backend's Isolation Forest plus persistence logic, never from the
+frontend. **That field does not exist server-side today**:
+`POST /typing/session` returns an `anomaly` object containing
+`anomaly_score` and `is_anomaly`, and in demo mode the per-session `status` is
+produced by the demo generator in `data.js`. Treat the three-state status as
+part of the still-to-be-implemented contract, not as something the current
+backend produces.
 
 - `GET /api/users/{user_id}/baseline` → `{ typing_speed, dwell_mean,
   flight_mean, correction_rate, rhythm_variability, pause_count, wpm,
@@ -117,4 +151,19 @@ fields above. That is a hard privacy boundary of the project.
 - **Privacy copy is honest.** Controls are labeled Active / Demo only /
   Planned. The agent does extract features locally (see `agent/listener.py`),
   so the "local processing" claim is accurate; on-device anomaly detection is
-  labeled as planned.
+  labeled as planned.
+- **Units are explicit.** Every metric carries its unit in tiles, table cells
+  and chart axes (`wpm`, `ms`, `%`, seconds for rhythm variability), and the
+  chart subtitle spells the unit out in words instead of a bare symbol.
+- **Accessibility is part of the same UI, not a separate mode.** Skip link;
+  `aria-current` navigation; `aria-pressed` segmented controls; radio groups for
+  check-ins and the symptom questionnaire; `aria-live` status, interpretation
+  and tile counters; a text summary of the chart for screen readers; a
+  focusable, scrollable sessions table with a sticky header that becomes cards
+  on small screens; keyboard-reachable controls everywhere; and full
+  `prefers-reduced-motion` support (including Chart.js animation, the agent
+  progress bar and the toast).
+- **Rendering is defensive.** The dashboard never assumes a baseline, a session
+  field, or chart data exists — an empty history, an unconnected backend or a
+  partial payload degrade to "no baseline yet" / "no sessions today yet" /
+  fallback notes instead of throwing.

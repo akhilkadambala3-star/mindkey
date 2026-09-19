@@ -26,6 +26,25 @@ const API_BASE = null; // e.g. "http://localhost:8000" when the backend is ready
 const USER_ID = "demo-user-1";
 
 /* --------------------------------------------------------------------------
+   Agent parameters mirrored for the demo (single frontend source)
+   --------------------------------------------------------------------------
+   These are NOT new settings invented by the frontend. The single source of
+   truth remains the real desktop agent in agent/listener.py
+   (SESSION_DURATION_S = 20.0, DAILY_SESSION_LIMIT = 100).
+
+   They are mirrored here so the demo agent simulator, the "Sessions today"
+   tile and every piece of daily-limit copy in the UI stay consistent with the
+   real agent and with each other. If the agent's values ever change, update
+   these two numbers and the whole frontend follows.
+   -------------------------------------------------------------------------- */
+
+const AGENT_SESSION_DURATION_S = 20; // mirrors SESSION_DURATION_S in agent/listener.py
+const AGENT_DAILY_SESSION_LIMIT = 100; // mirrors DAILY_SESSION_LIMIT in agent/listener.py
+
+/** True when the dashboard is showing simulated data instead of a live backend. */
+const demoMode = () => !API_BASE;
+
+/* --------------------------------------------------------------------------
    Local storage (tiny safe wrapper)
    -------------------------------------------------------------------------- */
 
@@ -322,8 +341,6 @@ async function deleteAllData() {
 /* --------------------------------------------------------------------------
    Scenario metadata + deterministic helper exports
    -------------------------------------------------------------------------- */
-
-const demoMode = () => !API_BASE;
 
 const CHECKIN_OPTIONS = [
   { id: "feeling_well", label: "Feeling well" },
