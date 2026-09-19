@@ -251,7 +251,7 @@ def _mark_upload_done():
 def main():
     print(
         "MindKey listener running: a session starts on your first keypress "
-        "and ends automatically after 2 minutes. Press Ctrl+C to quit."
+        "and ends automatically after 20 seconds. Press Ctrl+C to quit."
     )
     listener = keyboard.Listener(on_press=on_press, on_release=on_release)
     listener.start()
