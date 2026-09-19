@@ -3,7 +3,7 @@
 Sessions no longer require pressing Esc to end:
 
 - A session starts on the first meaningful keypress (non-Esc, non-repeat)
-  and ends automatically exactly 2 minutes later.
+  and ends automatically exactly 20 secs later.
 - When a session ends, its timing features are extracted and uploaded to
   the existing ``/typing/session`` endpoint exactly as before.
 - After the upload the listener waits for the next meaningful keypress
@@ -28,9 +28,9 @@ TEST_USER_ID = "e1a556fe-eb9b-405a-9859-dca55c715493"
 BACKEND_URL = "http://127.0.0.1:8000/typing/session"
 
 # A session runs for exactly this long, counted from its first keypress.
-SESSION_DURATION_S = 120.0
+SESSION_DURATION_S = 20.0
 # Maximum number of completed sessions collected per calendar day.
-DAILY_SESSION_LIMIT = 10
+DAILY_SESSION_LIMIT = 100
 # How often the main loop re-checks for activity while no session is open.
 IDLE_POLL_INTERVAL_S = 0.1
 
