@@ -17,6 +17,10 @@ This subpackage sits on top of the deterministic Phase 2 evidence layer. Phase
 - ``engine`` (Phase 3.3): the bounded, deterministic investigation state
   machine that orchestrates the modules above and returns an
   ``InvestigationResult``.
+- ``critic`` (Phase 3.4): deterministic validation of a result against its own
+  evidence (grounding, contradictions, unsupported-claim rejection).
+- ``report`` (Phase 3.4): assembly of a grounded, evidence-linked,
+  non-diagnostic ``GroundedReport``.
 
 Explicit non-goals for this phase (by design):
 
@@ -42,6 +46,18 @@ from .alternatives import (
     AlternativeFinding,
     AlternativeStatus,
     assess_alternatives,
+)
+from .critic import (
+    CLINICAL_TERMS,
+    CRITIC_SCHEMA_VERSION,
+    SAFETY_EXEMPTIONS,
+    Contradiction,
+    CriticReason,
+    Critique,
+    RejectedClaim,
+    critique,
+    evidence_index,
+    trace_digest,
 )
 from .engine import (
     ALT_WINDOWS,
@@ -88,6 +104,16 @@ from .hypotheses import (
     question_text,
     unanswerable_questions,
 )
+from .report import (
+    REPORT_DISCLAIMER,
+    REPORT_SCHEMA_VERSION,
+    Conclusion,
+    GroundedReport,
+    ReportClaim,
+    ReportLink,
+    UncertaintySummary,
+    build_grounded_report,
+)
 from .persistence import (
     SOURCE_PERSISTENCE,
     PersistenceClassification,
@@ -113,6 +139,20 @@ __all__ = [
     "ALT_WINDOWS",
     "ALTERNATIVE_CATALOG",
     "CLAIM_TEMPLATES",
+    "CLINICAL_TERMS",
+    "CRITIC_SCHEMA_VERSION",
+    "Conclusion",
+    "Contradiction",
+    "CriticReason",
+    "Critique",
+    "GroundedReport",
+    "REPORT_DISCLAIMER",
+    "REPORT_SCHEMA_VERSION",
+    "RejectedClaim",
+    "ReportClaim",
+    "ReportLink",
+    "SAFETY_EXEMPTIONS",
+    "UncertaintySummary",
     "CONTEXT_CANDIDATES",
     "CachingRepository",
     "CollectionRequest",
@@ -156,7 +196,10 @@ __all__ = [
     "assess_persistence",
     "assess_robustness",
     "baseline_reference",
+    "build_grounded_report",
     "create_hypotheses",
+    "critique",
+    "evidence_index",
     "deviating_keys",
     "evaluate_hypotheses",
     "format_count",
@@ -167,6 +210,7 @@ __all__ = [
     "moved_signature_from_stats",
     "question_text",
     "register_from_behavioral_evidence",
+    "trace_digest",
     "render_claim",
     "run_investigation",
     "select_next_collection",

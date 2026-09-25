@@ -112,6 +112,27 @@ class InvestigationTrace:
         self._events: list[TraceEvent] = []
         self._clock = clock or _utcnow
 
+    @classmethod
+    def from_events(cls, events, clock: Callable[[], datetime] | None = None):
+        """Build a trace pre-loaded with existing events (Phase 3.4).
+
+        A later phase (the critic) needs to **continue the same investigation
+        trace** instead of starting a second one. The supplied events keep their
+        ``seq`` values, so the next recorded event continues the sequence.
+
+        Args:
+            events: an iterable of :class:`TraceEvent` objects or their dict
+                form (as produced by :meth:`to_dicts`).
+            clock: optional zero-argument clock for subsequently recorded
+                events.
+        """
+        trace = cls(clock=clock)
+        trace._events = [
+            event if isinstance(event, TraceEvent) else TraceEvent(**event)
+            for event in (events or ())
+        ]
+        return trace
+
     # -- recording ---------------------------------------------------------
 
     def record(
