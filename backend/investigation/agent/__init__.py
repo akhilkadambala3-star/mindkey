@@ -14,12 +14,16 @@ This subpackage sits on top of the deterministic Phase 2 evidence layer. Phase
 - ``hypotheses``: the fixed H1-H4 behavioral hypothesis catalog, its
   evidence-linked evaluation, and the missing-evidence question registry.
 - ``alternatives``: the deterministic alternative-explanation scan.
+- ``engine`` (Phase 3.3): the bounded, deterministic investigation state
+  machine that orchestrates the modules above and returns an
+  ``InvestigationResult``.
 
 Explicit non-goals for this phase (by design):
 
-- No investigation graph, no nodes, no routing, and no stopping logic yet.
 - No LLM and no LangGraph. No new dependencies at all: only Pydantic and the
   standard library are used.
+- The engine is orchestration only: it adds no reasoning rules, no thresholds,
+  and no claims.
 - No database writes, no schema changes, no API routes, and no dashboard work.
 - No typed content is read or processed: only structured numeric behavioral
   features, ids, timestamps, counts and statuses.
@@ -38,6 +42,19 @@ from .alternatives import (
     AlternativeFinding,
     AlternativeStatus,
     assess_alternatives,
+)
+from .engine import (
+    ALT_WINDOWS,
+    DEFAULT_RECENT_LIMIT,
+    ENGINE_SCHEMA_VERSION,
+    MAX_ITERATIONS,
+    MAX_TOOL_CALLS,
+    NODE_NAMES,
+    CollectionRequest,
+    InvestigationResult,
+    StopReason,
+    run_investigation,
+    select_next_collection,
 )
 from .evidence import (
     CLAIM_TEMPLATES,
@@ -93,10 +110,14 @@ from .trace import (
 )
 
 __all__ = [
+    "ALT_WINDOWS",
     "ALTERNATIVE_CATALOG",
     "CLAIM_TEMPLATES",
     "CONTEXT_CANDIDATES",
     "CachingRepository",
+    "CollectionRequest",
+    "DEFAULT_RECENT_LIMIT",
+    "ENGINE_SCHEMA_VERSION",
     "EVIDENCE_SCHEMA_VERSION",
     "EVENT_LABELS",
     "EvidenceItem",
@@ -108,7 +129,11 @@ __all__ = [
     "HypothesisId",
     "HypothesisReasoning",
     "HypothesisSpec",
+    "InvestigationResult",
     "InvestigationTrace",
+    "MAX_ITERATIONS",
+    "MAX_TOOL_CALLS",
+    "NODE_NAMES",
     "PersistenceClassification",
     "PersistenceFinding",
     "QUESTION_KEYS",
@@ -119,6 +144,7 @@ __all__ = [
     "SOURCE_ALTERNATIVES",
     "SOURCE_ML",
     "SOURCE_PERSISTENCE",
+    "StopReason",
     "TraceEvent",
     "TraceEventType",
     "UNANSWERABLE_QUESTIONS",
@@ -142,5 +168,7 @@ __all__ = [
     "question_text",
     "register_from_behavioral_evidence",
     "render_claim",
+    "run_investigation",
+    "select_next_collection",
     "unanswerable_questions",
 ]
