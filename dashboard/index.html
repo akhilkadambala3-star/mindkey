@@ -498,7 +498,7 @@
               <li>
                 <span class="dot dot-muted" id="dataSourceApiDot"></span>
                 <span><strong>MindKey backend API</strong> <span class="opt" id="dataSourceApiOpt">(not connected)</span><br>
-                The desktop agent already writes to <code>POST /typing/session</code>, but the backend does not yet expose the read endpoints this dashboard needs — sessions, baseline and agent status — and has no browser CORS access configured. Until those exist the dashboard stays in demo mode. Set <code>API_BASE</code> in <code>data.js</code> when they do.</span>
+                The backend now exposes read endpoints for <strong>sessions</strong>, <strong>baseline</strong> and the <strong>investigation report</strong> (Phase 4), with browser CORS access already configured for the dashboard origin. The dashboard still starts in demo mode by default; to read live data, run the backend and open the dashboard with <code>?api=http://localhost:8000&amp;user=&lt;your-user-uuid&gt;</code>. Agent status, check-ins, symptoms and delete remain <strong>planned</strong>.</span>
               </li>
             </ul>
           </div>

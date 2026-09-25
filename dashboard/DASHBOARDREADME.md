@@ -10,7 +10,7 @@ presents a disease risk.
 | --- | --- |
 | `index.html` | App shell: sidebar, topbar, and all views (Home, Trends, Sessions, Check-ins, Symptom check, Health Insights, Medical Assistance, Privacy, Settings). |
 | `style.css` | The design system: warm-paper light theme, pine-green primary, restrained status colors, responsive layout (full sidebar → icon rail → top bar). |
-| `data.js` | **The data layer.** One centralized source for demo data, localStorage persistence, and the `API_BASE` switch that connects the real backend later. The UI never reads raw data directly. |
+| `data.js` | **The data layer.** One centralized source for demo data, localStorage persistence, and the runtime configuration that connects the real backend. The UI never reads raw data directly. |
 | `app.js` | SPA logic: router, per-view renderers, typing-state computation, agent-status simulator, Chart.js helpers, check-in / symptom / care flows. |
 
 ## Running it
@@ -45,10 +45,11 @@ across reloads. "Delete all my data" clears them. The agent-status card
 simulates the real agent lifecycle (waiting → analyzing with countdown →
 uploading → daily limit) so the states the product will show are visible now.
 
-Because the dashboard is simulated, a **Demo data** chip is shown in the
-topbar whenever demo mode is active, the Monitoring card is labelled
-**Simulated**, and Settings → Data source explains that live read endpoints are
-not connected yet. Nothing in demo mode claims to be real collected data.
+Because the dashboard is simulated by default, a **Demo data** chip is shown in
+the topbar whenever demo mode is active, the Monitoring card is labelled
+**Simulated**, and Settings → Data source states whether the dashboard is on
+simulated data or a live backend. Nothing in demo mode claims to be real
+collected data, and live mode never shows simulated rows.
 
 The agent simulator mirrors the real desktop agent instead of inventing its
 own numbers. Two constants at the top of `data.js` are the single frontend
@@ -69,31 +70,60 @@ marked **Planned**.
 
 ## Connecting the real backend
 
-In `data.js` set:
+Live mode is a **runtime** setting — no file edit is required:
 
-```js
-const API_BASE = "http://localhost:8000"; // was null
+```
+http://localhost:5500/?api=http://localhost:8000&user=<your-user-uuid>
 ```
 
-Two things must exist before that switch is useful:
+Values resolve in this order (highest first):
 
-1. **The read endpoints below** — the backend currently exposes only POST
-   `/typing/session`, POST `/baseline/{user_id}`, GET `/health` and GET
-   `/supabase-test`.
-2. **Browser CORS access on the backend.** It sends no CORS headers today, so a
-   dashboard served from `:5500` cannot call it on `:8000`. Adding CORS
-   middleware is a backend change and is outside the scope of the frontend
-   work.
+1. **URL parameters** — `?api=<base>` and `?user=<id>`.
+2. **localStorage** — keys `mindkey.apiBase` / `mindkey.userId`, so a base you
+   pass once is remembered on later visits.
+3. **Built-in defaults** — `null` (demo mode) and `"demo-user-1"`.
 
-The UI never changes — every function in the data layer already branches on
-`API_BASE`. The backend currently exposes only `POST /typing/session`,
-`POST /baseline/{user_id}`, `GET /health`, and `GET /supabase-test`, so these
-read/action endpoints still need to be added (shapes below). Until then the
-dashboard stays in demo mode, which is intentional.
+Pass `?api=demo` to return to demo mode and forget a remembered API base. The
+dashboard stays in demo mode by default; live mode only activates once an API
+base is configured.
 
-### Contract (to be implemented server-side)
+Running it:
 
-`GET /api/users/{user_id}/sessions` — array, oldest first:
+```bash
+# terminal 1 — backend (from backend/)
+./.venv/Scripts/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
+
+# terminal 2 — dashboard (from dashboard/)
+python -m http.server 5500
+```
+
+Then open `http://localhost:5500/?api=http://localhost:8000&user=<uuid>`.
+
+What is already wired up:
+
+1. **Read endpoints.** `GET /api/users/{user_id}/sessions`,
+   `GET /api/users/{user_id}/baseline` and
+   `GET /api/users/{user_id}/investigation` (Phase 4) are implemented. The
+   sessions and baseline endpoints are what the dashboard reads today; the
+   investigation endpoint exists but has no dashboard view yet.
+2. **Browser CORS access.** The backend sends CORS headers for the dashboard
+   origin (`http://localhost:5500` and `http://127.0.0.1:5500`), `GET` only,
+   with credentials disabled.
+
+`user` must be a **UUID**, because the backend stores `user_id` as a uuid
+column: a malformed value is rejected by the database and the dashboard
+degrades to empty states instead of crashing. Agent status, check-ins, symptoms
+and data deletion are still **planned** — the dashboard has no live path for
+them, so those controls remain local/demo only.
+
+The UI never changes between modes — every function in the data layer branches
+on the resolved `API_BASE`, and live mode starts from an empty state and loads
+real data before rendering (it never shows simulated rows while claiming to be
+live).
+
+### Read contract
+
+`GET /api/users/{user_id}/sessions` — array, oldest first (implemented, Phase 4):
 
 ```json
 [
@@ -108,25 +138,26 @@ dashboard stays in demo mode, which is intentional.
     "flight_mean_ms": 80,
     "correction_rate": 0.06,
     "rhythm_variability": 0.19,
-    "pause_count": 4,
-    "consistency": 96,
-    "status": "normal"
+    "pause_count": 4
   }
 ]
 ```
 
-`status` is one of `"normal"` / `"elevated"` / `"flagged"` and is *intended* to
-come from the backend's Isolation Forest plus persistence logic, never from the
-frontend. **That field does not exist server-side today**:
-`POST /typing/session` returns an `anomaly` object containing
-`anomaly_score` and `is_anomaly`, and in demo mode the per-session `status` is
-produced by the demo generator in `data.js`. Treat the three-state status as
-part of the still-to-be-implemented contract, not as something the current
-backend produces.
+The live contract carries timing-derived fields only. Two fields the demo
+generator adds for its simulated story are **not** part of it and stay absent
+in live mode: `status` (`"normal"` / `"elevated"` / `"flagged"`) and
+`consistency`. The Sessions table therefore shows a neutral status, and the
+Home/quality consistency figure shows "–" for live data. `duration_s` is
+also absent from the contract; the dashboard derives it from
+`session_start`/`session_end` for display only.
 
 - `GET /api/users/{user_id}/baseline` → `{ typing_speed, dwell_mean,
   flight_mean, correction_rate, rhythm_variability, pause_count, wpm,
-  sample_count, updated_at }`
+  sample_count, updated_at }` — implemented (Phase 4); a user with no baseline
+  returns `sample_count: 0` with null fields
+- `GET /api/users/{user_id}/investigation?session_id=&as_of=` → grounded
+  investigation report (evidence, timeline, limitations, disclaimer) —
+  implemented (Phase 4); no dashboard view yet
 - `GET /api/agent/status` → `{ state: "waiting"|"session"|"uploading"|
   "paused"|"limit", session_remaining_s, sessions_today }` — planned
 - `POST /api/users/{user_id}/checkins` → `{ user_id, date, factor, label, note }`

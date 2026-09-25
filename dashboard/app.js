@@ -1563,19 +1563,25 @@ function wire() {
 
 async function init() {
   App.chartOk = typeof Chart !== "undefined";
-  setScenario("variation");
-  App.sessions = DemoState.sessions;
-  App.baseline = DemoState.baseline;
   wire();
-  renderSettings();
   renderCheckinHistory();
-  setView("home");
+
   if (demoMode()) {
+    setScenario("variation");
+    App.sessions = DemoState.sessions;
+    App.baseline = DemoState.baseline;
     agentResetDay();
+    renderSettings();
+    setView("home");
   } else {
-    // Live mode: agent status comes from the backend (endpoint planned).
+    // Live mode. Start from an honest empty state and load real data — never
+    // seed simulated rows here, because they would be shown labelled "live".
+    App.sessions = [];
+    App.baseline = null;
     App.agent.state = "waiting";
-    renderAgent();
+    renderSettings();
+    setView("home");
+    await refreshData();
   }
 }
 

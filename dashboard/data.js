@@ -1,29 +1,37 @@
 /*
   MindKey — data layer (dashboard/data.js)
 
-  Everything the UI renders comes through this file. Today the backend only
-  exposes POST endpoints (/typing/session, /baseline/{user_id}), so the
-  dashboard runs in DEMO MODE by default: a single deterministic generator
-  produces three scenarios (consistent / recent variation / persistent
-  change) so the full product flow can be demonstrated.
+  Everything the UI renders comes through this file. The dashboard runs in
+  DEMO MODE by default: a deterministic generator produces three scenarios
+  (consistent / recent variation / persistent change) so the full product
+  flow can be demonstrated without a backend.
 
-  To connect the real backend later:
-    1. Set API_BASE to the backend origin, e.g. "http://localhost:8000".
-    2. Implement the endpoints named in each function's comment. The
-       functions already branch on API_BASE, so the UI code never changes.
+  LIVE MODE reads real sessions and the personal baseline from the Phase 4
+  read API. Point the dashboard at a running backend at runtime — no edit to
+  this file needed:
 
-  The backend must add these read/action endpoints (all described in
-  DASHBOARDREADME.md):
-    GET    /api/users/{user_id}/sessions
-    GET    /api/users/{user_id}/baseline
-    GET    /api/agent/status            (planned)
-    POST   /api/users/{user_id}/checkins
-    POST   /api/users/{user_id}/symptoms
-    DELETE /api/users/{user_id}/data
+      http://localhost:5500/?api=http://localhost:8000&user=<uuid>
+
+  Resolution order for both values (highest first):
+    1. URL parameters  ?api=<base>  &user=<id>   (?api=demo forces demo mode)
+    2. localStorage    "mindkey.apiBase" / "mindkey.userId"
+    3. built-in defaults (null = demo mode, "demo-user-1")
+
+  Endpoint status:
+    GET    /api/users/{user_id}/sessions         implemented (Phase 4)
+    GET    /api/users/{user_id}/baseline         implemented (Phase 4)
+    GET    /api/users/{user_id}/investigation    implemented (Phase 4)
+    GET    /api/agent/status                     planned
+    POST   /api/users/{user_id}/checkins         planned
+    POST   /api/users/{user_id}/symptoms         planned
+    DELETE /api/users/{user_id}/data             planned
 */
 
-const API_BASE = null; // e.g. "http://localhost:8000" when the backend is ready. null = demo mode.
-const USER_ID = "demo-user-1";
+// Runtime configuration. Resolved at load time by resolveRuntimeConfig() below
+// from URL parameters, then localStorage, then these built-in defaults.
+// API_BASE = null keeps the dashboard in demo mode with simulated data.
+let API_BASE = null; // e.g. "http://localhost:8000" to read from a live backend.
+let USER_ID = "demo-user-1";
 
 /* --------------------------------------------------------------------------
    Agent parameters mirrored for the demo (single frontend source)
@@ -86,7 +94,55 @@ const KEYS = {
   checkins: "mindkey.checkins",
   symptoms: "mindkey.symptoms",
   appointment: "mindkey.appointment",
+  apiBase: "mindkey.apiBase",
+  userId: "mindkey.userId",
 };
+
+/* --------------------------------------------------------------------------
+   Runtime configuration
+   --------------------------------------------------------------------------
+   The dashboard can be pointed at a live backend without editing this file.
+   Precedence for API_BASE and USER_ID (highest first):
+     1. URL query parameters   ?api=<base>&user=<id>
+     2. localStorage           "mindkey.apiBase" / "mindkey.userId"
+     3. built-in defaults      (null = demo mode, "demo-user-1")
+   ?api=demo (or ?api=) forces demo mode and forgets a remembered API base.
+   -------------------------------------------------------------------------- */
+
+function resolveRuntimeConfig() {
+  const params = new URLSearchParams(window.location.search);
+  const apiParam = params.get("api");
+  const userParam = params.get("user");
+
+  if (apiParam !== null) {
+    const value = apiParam.trim();
+    if (value === "" || value.toLowerCase() === "demo") {
+      // Explicitly return to demo mode and drop any remembered backend base.
+      store.remove(KEYS.apiBase);
+      API_BASE = null;
+    } else {
+      const base = value.replace(/\/+$/, "");
+      store.set(KEYS.apiBase, base);
+      API_BASE = base;
+    }
+  } else {
+    const stored = store.get(KEYS.apiBase, null);
+    API_BASE =
+      typeof stored === "string" && stored.trim() !== ""
+        ? stored.trim().replace(/\/+$/, "")
+        : null;
+  }
+
+  if (userParam !== null && userParam.trim() !== "") {
+    store.set(KEYS.userId, userParam.trim());
+    USER_ID = userParam.trim();
+  } else {
+    const stored = store.get(KEYS.userId, null);
+    USER_ID = typeof stored === "string" && stored.trim() !== "" ? stored.trim() : "demo-user-1";
+  }
+}
+
+resolveRuntimeConfig();
 
 /* --------------------------------------------------------------------------
    Deterministic mock data
@@ -270,10 +326,27 @@ function setScenario(key) {
    Demo mode returns local data; API mode talks to the backend.
    -------------------------------------------------------------------------- */
 
+/**
+ * The session read contract omits duration_s, so derive it for display from the
+ * start/end timestamps. Rows with missing or unusable timestamps are returned
+ * untouched, so a partial payload can never produce a NaN duration.
+ */
+function withDerivedDuration(session) {
+  if (!session || typeof session !== "object") return session;
+  if (typeof session.duration_s === "number") return session;
+  const start = Date.parse(session.session_start);
+  const end = Date.parse(session.session_end);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return session;
+  return { ...session, duration_s: Math.round((end - start) / 1000) };
+}
+
 async function getSessions() {
   if (API_BASE) {
     const res = await fetch(`${API_BASE}/api/users/${USER_ID}/sessions`);
-    return res.json();
+    if (!res.ok) return [];
+    const data = await res.json().catch(() => null);
+    // Never let an error body or a non-array payload reach the views.
+    return Array.isArray(data) ? data.map(withDerivedDuration) : [];
   }
   return DemoState.sessions;
 }
@@ -281,7 +354,13 @@ async function getSessions() {
 async function getBaseline() {
   if (API_BASE) {
     const res = await fetch(`${API_BASE}/api/users/${USER_ID}/baseline`);
-    return res.json();
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null);
+    // An error body ({"detail": ...}) or any non-baseline shape must never be
+    // passed downstream as if it were a real baseline.
+    return data && typeof data === "object" && !Array.isArray(data) && "sample_count" in data
+      ? data
+      : null;
   }
   return DemoState.baseline;
 }
