@@ -21,6 +21,10 @@ This subpackage sits on top of the deterministic Phase 2 evidence layer. Phase
   evidence (grounding, contradictions, unsupported-claim rejection).
 - ``report`` (Phase 3.4): assembly of a grounded, evidence-linked,
   non-diagnostic ``GroundedReport``.
+- ``timeline`` (Phase 3.5): plain-text rendering of the investigation
+  timeline and the grounded report. Presentation only.
+- ``demo`` (Phase 3.5): the reproducible, offline runner that builds an
+  in-memory scenario, investigates it and prints report + timeline.
 
 Explicit non-goals for this phase (by design):
 
@@ -58,6 +62,19 @@ from .critic import (
     critique,
     evidence_index,
     trace_digest,
+)
+from .demo import (
+    DEFAULT_AS_OF,
+    DEMO_DATASETS,
+    DEMO_KEYS,
+    DEMO_SCHEMA_VERSION,
+    DemoRun,
+    InMemoryRepository,
+    demo_payload,
+    format_run,
+    main,
+    render_demo,
+    run_demo,
 )
 from .engine import (
     ALT_WINDOWS,
@@ -126,6 +143,14 @@ from .persistence import (
     moved_signature_from_drift,
     moved_signature_from_stats,
 )
+from .timeline import (
+    TIMELINE_SCHEMA_VERSION,
+    render,
+    render_report,
+    render_report_lines,
+    render_timeline,
+    render_timeline_for,
+)
 from .trace import (
     EVENT_LABELS,
     FINGERPRINT_LENGTH,
@@ -155,6 +180,12 @@ __all__ = [
     "UncertaintySummary",
     "CONTEXT_CANDIDATES",
     "CachingRepository",
+    "DEFAULT_AS_OF",
+    "DEMO_DATASETS",
+    "DEMO_KEYS",
+    "DEMO_SCHEMA_VERSION",
+    "DemoRun",
+    "InMemoryRepository",
     "CollectionRequest",
     "DEFAULT_RECENT_LIMIT",
     "ENGINE_SCHEMA_VERSION",
@@ -185,6 +216,7 @@ __all__ = [
     "SOURCE_ML",
     "SOURCE_PERSISTENCE",
     "StopReason",
+    "TIMELINE_SCHEMA_VERSION",
     "TraceEvent",
     "TraceEventType",
     "UNANSWERABLE_QUESTIONS",
@@ -199,20 +231,30 @@ __all__ = [
     "build_grounded_report",
     "create_hypotheses",
     "critique",
+    "demo_payload",
     "evidence_index",
     "deviating_keys",
     "evaluate_hypotheses",
+    "main",
     "format_count",
     "format_percent",
+    "format_run",
     "format_value",
     "is_answerable",
     "moved_signature_from_drift",
     "moved_signature_from_stats",
     "question_text",
     "register_from_behavioral_evidence",
-    "trace_digest",
+    "render",
     "render_claim",
+    "render_demo",
+    "render_report",
+    "render_report_lines",
+    "render_timeline",
+    "render_timeline_for",
+    "run_demo",
     "run_investigation",
     "select_next_collection",
+    "trace_digest",
     "unanswerable_questions",
 ]
