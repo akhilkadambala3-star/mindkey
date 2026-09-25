@@ -52,6 +52,13 @@ class AgentState(BaseModel):
     limitations: list[str] = Field(default_factory=list)
     next_action: str = ""
 
+    # Evidence and trace artifacts (Phase 3.1). Kept as plain dicts so this
+    # state model never imports the agent layer (investigation/ must not depend
+    # on investigation/agent/); the agent validates them with its own Pydantic
+    # models (EvidenceItem, TraceEvent).
+    evidence: list[dict] = Field(default_factory=list)
+    trace: list[dict] = Field(default_factory=list)
+
     # Bookkeeping for stopping criteria and observability.
     iteration: int = 0
     tools_called: list[str] = Field(default_factory=list)
