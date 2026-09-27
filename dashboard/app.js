@@ -34,19 +34,19 @@ const METRICS = {
   speed: {
     label: "Typing speed",
     unit: "wpm",
-    get: (s) => s.wpm,
+    get: (s) => (isNumber(s.wpm) ? Math.round(s.wpm * 10) / 10 : s.wpm),
     base: (b) => b.wpm,
   },
   dwell: {
     label: "Dwell time",
     unit: "ms",
-    get: (s) => s.dwell_mean_ms,
+    get: (s) => (isNumber(s.dwell_mean_ms) ? Math.round(s.dwell_mean_ms) : s.dwell_mean_ms),
     base: (b) => Math.round(b.dwell_mean * 1000),
   },
   flight: {
     label: "Flight time",
     unit: "ms",
-    get: (s) => s.flight_mean_ms,
+    get: (s) => (isNumber(s.flight_mean_ms) ? Math.round(s.flight_mean_ms) : s.flight_mean_ms),
     base: (b) => Math.round(b.flight_mean * 1000),
   },
   corrections: {
@@ -756,7 +756,7 @@ function buildChart({ sessions, labels, data, baseline, unit, color }) {
             },
             label: (item) => {
               const suffix = unit ? ` ${unit}` : "";
-              return `${item.dataset.label === "Your baseline" ? "Your baseline" : "Sessions"}: ${item.parsed.y}${suffix}`;
+              return `${item.dataset.label === "Your baseline" ? "Your baseline" : "Sessions"}: ${Number(item.parsed.y.toFixed(2))}${suffix}`;
             },
           },
         },
@@ -807,12 +807,23 @@ function renderSessions() {
   for (const s of list) {
     const status = STATUS_META[s.status] || STATUS_META.recorded;
     const tr = document.createElement("tr");
+    tr.className = "mk-session-row";
+    tr.tabIndex = 0;
+    tr.setAttribute("role", "button");
+    tr.setAttribute("aria-label", `Session on ${fmtFull(s.session_start)} at ${fmtTime(s.session_start)}: open details`);
+    tr.addEventListener("click", () => openSessionDialog(s));
+    tr.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        openSessionDialog(s);
+      }
+    });
     tr.innerHTML = `
       <td class="td-main" data-label="Date">${fmtFull(s.session_start)}<br><span class="opt">${fmtTime(s.session_start)}</span></td>
       <td data-label="Duration">${isNumber(s.duration_s) ? fmtDuration(s.duration_s) : "—"}</td>
-      <td class="num" data-label="Speed">${isNumber(s.wpm) ? `${s.wpm} <span class="opt">wpm</span>` : "—"}</td>
-      <td class="num" data-label="Dwell">${isNumber(s.dwell_mean_ms) ? `${s.dwell_mean_ms} <span class="opt">ms</span>` : "—"}</td>
-      <td class="num" data-label="Flight">${isNumber(s.flight_mean_ms) ? `${s.flight_mean_ms} <span class="opt">ms</span>` : "—"}</td>
+      <td class="num" data-label="Speed">${isNumber(s.wpm) ? `${Math.round(s.wpm)} <span class="opt">wpm</span>` : "—"}</td>
+      <td class="num" data-label="Dwell">${isNumber(s.dwell_mean_ms) ? `${Math.round(s.dwell_mean_ms)} <span class="opt">ms</span>` : "—"}</td>
+      <td class="num" data-label="Flight">${isNumber(s.flight_mean_ms) ? `${Math.round(s.flight_mean_ms)} <span class="opt">ms</span>` : "—"}</td>
       <td class="num" data-label="Corrections">${isNumber(s.correction_rate) ? `${Math.round(s.correction_rate * 100)}%` : "—"}</td>
       <td class="num" data-label="Pauses">${isNumber(s.pause_count) ? s.pause_count : "—"}</td>
       <td data-label="Status"><span class="pill ${status.pill}" title="${status.help}">${status.label}</span></td>`;
@@ -1086,6 +1097,80 @@ function renderInsights() {
   );
   why.push("MindKey compares you with your own baseline, never with population averages.");
   $("whyList").innerHTML = why.map((w) => `<li>${escapeHtml(w)}</li>`).join("");
+}
+
+/* --------------------------------------------------------------------------
+   Session details — one session against the personal baseline
+   -------------------------------------------------------------------------- */
+
+const SESSION_SIGNALS = [
+  { label: "Typing speed", unit: "wpm", get: (s) => s.wpm, base: (b) => b.wpm, fmt: (v) => Math.round(v) },
+  { label: "Dwell time", unit: "ms", get: (s) => s.dwell_mean_ms, base: (b) => (isNumber(b.dwell_mean) ? b.dwell_mean * 1000 : null), fmt: (v) => Math.round(v) },
+  { label: "Flight time", unit: "ms", get: (s) => s.flight_mean_ms, base: (b) => (isNumber(b.flight_mean) ? b.flight_mean * 1000 : null), fmt: (v) => Math.round(v) },
+  { label: "Correction rate", unit: "%", get: (s) => (isNumber(s.correction_rate) ? s.correction_rate * 100 : null), base: (b) => (isNumber(b.correction_rate) ? b.correction_rate * 100 : null), fmt: (v) => v.toFixed(1) },
+  { label: "Rhythm variability", unit: "s", get: (s) => s.rhythm_variability, base: (b) => b.rhythm_variability, fmt: (v) => v.toFixed(2) },
+  { label: "Pauses", unit: "", get: (s) => s.pause_count, base: (b) => b.pause_count, fmt: (v) => (Math.round(v * 10) / 10).toString() },
+];
+
+function openSessionDialog(s) {
+  const dlg = $("sessionDialog");
+  const b = App.baseline || {};
+  const threshold = (MK.state.payload && MK.state.payload.movedThreshold) || 0.1;
+  const invalid = s.status === "invalid" || s.is_valid === false;
+
+  const rows = SESSION_SIGNALS.map((sig) => {
+    const v = sig.get(s);
+    const base = sig.base(b);
+    const rel = isNumber(v) && isNumber(base) && base !== 0 ? (v - base) / base : null;
+    const moved = isNumber(rel) && Math.abs(rel) >= threshold;
+    const change = isNumber(rel) ? `${rel > 0 ? "+" : rel < 0 ? "−" : ""}${Math.abs(Math.round(rel * 1000) / 10)}%` : "—";
+    return `<tr${moved ? ' class="moved"' : ""}>
+      <th scope="row">${sig.label}</th>
+      <td class="num">${isNumber(v) ? `${sig.fmt(v)} <span class="opt">${sig.unit}</span>` : "—"}</td>
+      <td class="num">${isNumber(base) ? `${sig.fmt(base)} <span class="opt">${sig.unit}</span>` : "—"}</td>
+      <td class="num">${change}${moved ? ' <span class="mk-moved-tag">beyond ' + Math.round(threshold * 100) + "%</span>" : ""}</td>
+    </tr>`;
+  }).join("");
+  const movedCount = SESSION_SIGNALS.filter((sig) => {
+    const v = sig.get(s), base = sig.base(b);
+    return isNumber(v) && isNumber(base) && base !== 0 && Math.abs((v - base) / base) >= threshold;
+  }).length;
+
+  const ml = s.anomaly;
+  const mlLine = invalid
+    ? "Not scored: this session failed validation."
+    : ml
+      ? `Isolation Forest score ${Number(ml.anomaly_score).toFixed(2)} (0 = typical for you, 1 = most unusual). ${ml.is_anomaly ? "Flagged as unusual for you." : "Within your normal range."}`
+      : "Not scored: the model trains once there are at least 10 earlier valid sessions.";
+
+  const day = String(s.session_start || s.date || "").slice(0, 10);
+  const dayCheckins = MK.state.payload && MK.state.payload.source === "demo" ? MK.state.payload.checkins : getCheckins();
+  const sameDay = (dayCheckins || []).filter((c) => String(c.date).slice(0, 10) === day);
+
+  $("sessionDialogEyebrow").textContent = `Session ${s.session_id}${demoMode() ? " · demo data" : ""}`;
+  $("sessionDialogTitle").textContent = `${fmtFull(s.session_start)} · ${fmtTime(s.session_start)}`;
+  $("sessionDialogBody").innerHTML = `
+    <div class="mk-session-facts">
+      <div class="mk-stat"><b>${isNumber(s.duration_s) ? fmtDuration(s.duration_s) : "—"}</b><span>duration</span></div>
+      <div class="mk-stat"><b>${invalid ? "Invalid" : "Valid"}</b><span>data quality</span></div>
+      <div class="mk-stat"><b>${invalid ? "—" : `${movedCount} of 6`}</b><span>signals beyond ${Math.round(threshold * 100)}%</span></div>
+    </div>
+    ${invalid ? `<p class="mk-session-note">This session failed feature validation (for example, a zero typing speed), so it is excluded from the baseline, the charts and the investigation.</p>` : ""}
+    <div class="mk-session-table-wrap">
+      <table class="mk-session-table">
+        <caption class="sr-only">Signals for this session compared with the personal baseline</caption>
+        <thead><tr><th scope="col">Signal</th><th scope="col">This session</th><th scope="col">Your baseline</th><th scope="col">Change</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div class="mk-session-meta">
+      <p><strong>ML:</strong> ${escapeHtml(mlLine)}</p>
+      <p><strong>Check-in that day:</strong> ${sameDay.length ? escapeHtml(sameDay.map((c) => (CHECKIN_OPTIONS.find((o) => o.id === c.factor) || { label: c.factor }).label).join(", ")) : "none"}</p>
+      <p class="mk-muted">A single session never decides anything. The investigation looks for changes that persist across sessions and signals.</p>
+    </div>`;
+  if (typeof dlg.showModal === "function") dlg.showModal();
+  else dlg.setAttribute("open", "");
+  $("sessionDialogClose").focus();
 }
 
 function escapeHtml(v) {
@@ -1532,6 +1617,10 @@ function wire() {
   // Privacy
   $("viewDataBtn").addEventListener("click", openDataDialog);
   $("dataDialogClose").addEventListener("click", () => $("dataDialog").close());
+  $("sessionDialogClose").addEventListener("click", () => $("sessionDialog").close());
+  $("sessionDialog").addEventListener("click", (e) => {
+    if (e.target === $("sessionDialog")) $("sessionDialog").close();
+  });
   $("dataDialog").addEventListener("click", (e) => {
     if (e.target === $("dataDialog")) $("dataDialog").close();
   });

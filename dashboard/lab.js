@@ -615,7 +615,7 @@ const MK = (() => {
                 const s = sessions[items[0].dataIndex];
                 return s ? `${fmtShort(s.session_start || s.date)} · session ${s.session_id}` : "";
               },
-              label: (item) => `${item.dataset.label}: ${item.parsed.y}${unit ? " " + unit : ""}`,
+              label: (item) => `${item.dataset.label}: ${Number(item.parsed.y.toFixed(2))}${unit ? " " + unit : ""}`,
               afterBody: (items) => {
                 const i = items[0].dataIndex;
                 const lines = [];
@@ -644,7 +644,7 @@ const MK = (() => {
      DASHBOARD
      ------------------------------------------------------------------------ */
   const DASH_METRICS = {
-    speed: { label: "Speed", get: (s) => s.wpm, base: (b) => b && b.wpm, unit: "wpm", title: "Typing speed" },
+    speed: { label: "Speed", get: (s) => (num(s.wpm) ? Math.round(s.wpm * 10) / 10 : s.wpm), base: (b) => b && b.wpm, unit: "wpm", title: "Typing speed" },
     corrections: { label: "Corrections", get: (s) => Math.round(s.correction_rate * 1000) / 10, base: (b) => b && num(b.correction_rate) ? Math.round(b.correction_rate * 1000) / 10 : null, unit: "%", title: "Correction rate" },
     pauses: { label: "Pauses", get: (s) => s.pause_count, base: (b) => b && b.pause_count, unit: "", title: "Pauses per session" },
     rhythm: { label: "Rhythm", get: (s) => s.rhythm_variability, base: (b) => b && num(b.rhythm_variability) ? Math.round(b.rhythm_variability * 100) / 100 : null, unit: "s", title: "Rhythm variability" },

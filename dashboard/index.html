@@ -448,7 +448,7 @@
 
           <div class="card" id="demoCard">
             <h3 class="card-title">Demo data</h3>
-            <p class="card-body">MindKey is currently running on <strong>simulated demo data</strong> so the full product experience can be explored without a connected backend. Every session, baseline and status shown is generated in your browser — it is not real collected typing data.</p>
+            <p class="card-body">MindKey is currently running on <strong>demo data</strong>, so the whole product can be explored without a connected backend. The sessions and check-ins are synthetic, not real typing. The ML scores and the investigation are real: the backend's Isolation Forest and agent were run on this data.</p>
             <p class="card-body">The Monitoring card also <strong>simulates the desktop agent</strong>: a simulated session lasts 20 seconds and stops at the same daily limit as the real agent in <code>agent/listener.py</code>.</p>
             <label class="field">
               <span>Scenario</span>
@@ -466,7 +466,7 @@
               <li>
                 <span class="dot dot-ok" id="dataSourceDemoDot"></span>
                 <span><strong>Simulated demo data</strong> <span class="opt" id="dataSourceDemoOpt">(active)</span><br>
-                Sessions, baseline and agent status are generated in your browser so the full product flow can be demonstrated. These are example values, not real collected typing data.</span>
+                Synthetic sessions and check-ins for seven scenarios, with real ML scores and real agent output computed from them (see the Demo Lab). The Monitoring card's agent status is simulated.</span>
               </li>
               <li>
                 <span class="dot dot-muted" id="dataSourceApiDot"></span>
@@ -514,6 +514,20 @@
   </div>
   <p class="control-desc">Everything MindKey stores for you — shown here as it would be sent to or read from the backend.</p>
   <pre class="data-dump" id="dataDump"></pre>
+</dialog>
+
+<!-- Session details dialog -->
+<dialog class="dialog mk-session-dialog" id="sessionDialog" aria-labelledby="sessionDialogTitle">
+  <div class="dialog-head">
+    <div>
+      <p class="mk-eyebrow" id="sessionDialogEyebrow">Session</p>
+      <h3 class="card-title" id="sessionDialogTitle" style="margin:2px 0 0">Session details</h3>
+    </div>
+    <button class="icon-btn" id="sessionDialogClose" aria-label="Close">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5.5 5.5 9 9M14.5 5.5l-9 9"/></svg>
+    </button>
+  </div>
+  <div id="sessionDialogBody" class="mk-session-body"></div>
 </dialog>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
