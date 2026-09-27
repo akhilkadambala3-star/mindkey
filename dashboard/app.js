@@ -1009,127 +1009,87 @@ function reportedSymptoms() {
    -------------------------------------------------------------------------- */
 
 function renderInsights() {
-  const state = typingState(App.sessions);
-  // Demo mode: the loaded scenario's check-ins stand in until the user adds
-  // their own (those stay in this browser).
-  const scenarioCheckins =
-    demoMode() && MK.state.payload
-      ? MK.state.payload.checkins.map((c) => ({
-          ...c,
-          label: (CHECKIN_OPTIONS.find((o) => o.id === c.factor) || {}).label || c.factor,
-        }))
-      : [];
-  const checkins = getCheckins().length ? getCheckins() : scenarioCheckins;
-  const latest = checkins.length ? checkins[checkins.length - 1] : null;
-  const contextual = latest && ["tired", "stressed", "poor_sleep", "unwell", "distracted"].includes(latest.factor);
+  // Every statement here comes from the agent's own output (MK.insightModel);
+  // symptoms are the one input the agent does not read, and say so.
+  const m = MK.insightModel();
   const symptoms = reportedSymptoms();
+  const k = m.key;
+  const persistent = k === "PERSISTENT_CHANGE";
+  const changed = k === "CHANGE_DETECTED";
+  const tooEarly = k === "NO_DATA" || k === "BASELINE_FORMING" || k === "INSUFFICIENT_EVIDENCE";
 
-  // Signal: typing
-  const typingTexts = {
-    ok: "Your recent sessions are consistent with your personal baseline.",
-    warn: "Several recent sessions have varied from your personal baseline.",
-    alert: "Several typing metrics have shifted from your personal baseline and stayed shifted.",
-  };
-  const typingDetail = {
-    ok: "No persistent change is present. MindKey compares you with your own baseline, learned from your own typing.",
-    warn: "The variation is recent and has not yet persisted long enough to be conclusive.",
-    alert: "The change has persisted across multiple sessions, which is why MindKey is paying closer attention.",
-  };
-  $("signalTypingText").textContent = typingTexts[state];
-  $("signalTypingDetail").textContent = typingDetail[state];
+  // Signal: typing pattern (the agent's conclusion)
+  $("signalTypingText").textContent = m.state.head + ".";
+  $("signalTypingDetail").textContent = m.conclusion ? m.conclusion.statement : m.state.text({});
 
-  // Signal: wellbeing
-  if (latest) {
-    $("signalWellbeingText").textContent = `You reported "${latest.label}"${latest.note ? ` — "${latest.note}"` : ""}.`;
-    $("signalWellbeingDetail").textContent = `Check-in on ${fmtFull(latest.date)}.${contextual ? " This kind of factor can explain short-term typing variation." : ""}`;
-  } else {
-    $("signalWellbeingText").textContent = "No check-ins yet.";
-    $("signalWellbeingDetail").textContent = "Completing a check-in when you notice variation helps MindKey separate everyday causes from unexplained patterns.";
-  }
+  // Signal: wellbeing context (what the agent made of the check-ins)
+  const lastEvent = m.events.length ? m.events[m.events.length - 1] : null;
+  $("signalWellbeingText").textContent = lastEvent
+    ? `Latest check-in: ${lastEvent.label.toLowerCase()} (${fmtFull(lastEvent.date)}).`
+    : "No check-ins yet.";
+  $("signalWellbeingDetail").textContent = m.contextLines.length
+    ? m.contextLines.join(" ")
+    : "A quick check-in when you notice a change helps MindKey separate everyday causes from unexplained patterns.";
 
-  // Signal: symptoms
+  // Signal: symptoms (not agent input)
   if (symptoms.length) {
     $("signalSymptomsText").textContent = symptoms.slice(0, 2).join("; ") + (symptoms.length > 2 ? ` +${symptoms.length - 2} more` : "") + ".";
-    $("signalSymptomsDetail").textContent = "Reported in the symptom questionnaire — kept alongside your typing history, never treated as a diagnosis.";
+    $("signalSymptomsDetail").textContent = "Kept alongside your typing history for your own reference. The AI investigation does not use them, and they are never treated as a diagnosis.";
   } else {
     $("signalSymptomsText").textContent = "No symptoms reported.";
-    $("signalSymptomsDetail").textContent = "The symptom questionnaire is optional and only asked when a persistent change remains unexplained.";
+    $("signalSymptomsDetail").textContent = "The symptom check is optional. It is most useful when a persistent change isn't explained by anything you reported.";
   }
 
   // Interpretation
-  const interp = $("interpretationCard");
-  const pill = $("interpretationPill");
-  const title = $("interpretationTitle");
-  const text = $("interpretationText");
-
-  let level, pillClass, headline, body;
-  if (state === "ok") {
-    level = "ok";
-    pillClass = "pill-ok";
-    headline = "Your pattern looks consistent";
-    body = "Your recent typing behavior remains close to your personal baseline, and no additional signals suggest anything to follow up on. Keep typing normally — MindKey continues learning quietly in the background.";
-  } else if (state === "warn") {
-    if (contextual) {
-      level = "warn";
-      pillClass = "pill-warn";
-      headline = "Variation with a likely everyday explanation";
-      body = `Recent variation overlaps with what you told us — ${CONTEXT_NOUNS[latest.factor] || latest.label.toLowerCase()}. MindKey treats this as contextualized: it stays in your history, and it is understood with that context in mind. We'll keep observing to confirm things settle back.`;
-    } else {
-      level = "warn";
-      pillClass = "pill-warn";
-      headline = "Worth monitoring";
-      body = "A few recent sessions differ from your usual pattern, but the change has not persisted long enough to draw conclusions. If you can, complete a short check-in — it helps MindKey understand the context.";
-    }
+  let level, pillClass, headline, body, action = "";
+  const ctxNames = m.supportedContext.join(" and ");
+  if (tooEarly) {
+    level = "ok"; pillClass = "pill-ok"; headline = "Too early to say";
+    body = m.state.text({ validSessions: null });
+  } else if (!persistent && !changed) {
+    level = "ok"; pillClass = "pill-ok"; headline = "Your pattern looks consistent";
+    body = "Your recent typing stays close to your personal baseline. Keep typing normally; MindKey keeps learning in the background.";
+  } else if (changed && m.contextExplains) {
+    level = "warn"; pillClass = "pill-warn"; headline = "A recent change with an everyday explanation";
+    body = `The change hasn't persisted, and the agent treats ${ctxNames} as a plausible explanation. MindKey will keep watching to confirm things settle.`;
+  } else if (changed) {
+    level = "warn"; pillClass = "pill-warn"; headline = "Worth watching";
+    body = "Some signals moved, but not for long enough to draw a conclusion. A short check-in helps the agent understand the context.";
+    action = `<button class="btn btn-ghost btn-sm" data-nav="checkins" style="margin-top:10px">Add a check-in</button>`;
+  } else if (m.contextExplains) {
+    level = "warn"; pillClass = "pill-warn"; headline = "A persistent change, with reported context";
+    body = `The change has lasted across recent sessions. You also reported ${ctxNames}, which the agent treats as a plausible explanation for part of it. Check in again once things settle. If the change continues after that, talking to your usual doctor is a sensible next step.`;
+  } else if (symptoms.length) {
+    level = "alert"; pillClass = "pill-alert"; headline = "Worth discussing with a professional";
+    body = "The change has lasted across recent sessions, nothing you reported explains it, and you noted symptoms. Bringing this investigation to your usual doctor is a sensible next step. MindKey cannot tell what is behind the change.";
   } else {
-    if (symptoms.length) {
-      level = "alert";
-      pillClass = "pill-alert";
-      headline = "Professional evaluation recommended";
-      body = "Several signals have persisted: your typing pattern has stayed different from your baseline, and you've reported symptoms you don't consider normal. Because multiple signals line up over time, MindKey recommends discussing these changes with a healthcare professional.";
-    } else {
-      level = "warn";
-      pillClass = "pill-warn";
-      headline = "Further check-in recommended";
-      body = "Your typing pattern has remained different from your usual baseline, but nothing you've shared yet explains it. A few more days of observation, a short check-in, and — if the change persists — a conversation with a professional are the sensible next steps.";
-    }
+    level = "warn"; pillClass = "pill-warn"; headline = "A persistent change, not explained by context";
+    body = `The change has lasted across recent sessions${m.contextRuledOut ? ", and what you reported (feeling well) makes sleep, stress or fatigue less likely" : ""}. MindKey will keep monitoring. The optional symptom check can round out the picture.`;
+    action = `<button class="btn btn-ghost btn-sm" data-nav="symptoms" style="margin-top:10px">Take the optional symptom check</button>`;
   }
 
-  interp.className = "card interpretation interpret-" + level;
-  pill.className = "pill " + pillClass;
-  pill.textContent = headline === "Your pattern looks consistent" ? "No notable concern" : headline;
-  title.textContent = headline;
-  text.textContent = body;
+  $("interpretationCard").className = "card interpretation interpret-" + level;
+  $("interpretationPill").className = "pill " + pillClass;
+  $("interpretationPill").textContent = m.state.label;
+  $("interpretationTitle").textContent = headline;
+  $("interpretationText").innerHTML = `${escapeHtml(body)}${action ? `<br>${action}` : ""}`;
 
-  // Why?
+  // Why? — the agent's own reasons
   const why = [];
-  why.push({
-    ok: "Your recent sessions remain consistent with the baseline MindKey learned from your own typing.",
-    warn: "Your recent sessions have varied from your personal baseline — enough to notice, not enough to conclude anything yet.",
-    alert: "Your typing pattern has shifted from your personal baseline and stayed shifted across several sessions.",
-  }[state]);
+  if (m.conclusion) why.push(`Agent conclusion: ${m.conclusion.statement}`);
+  if (m.depth && m.depth.statement) why.push(m.depth.statement);
+  m.contextLines.forEach((line) => why.push(line));
+  why.push(
+    symptoms.length
+      ? `You reported ${symptoms.length} symptom${symptoms.length > 1 ? "s" : ""}: ${symptoms.join("; ")}. These are not agent input.`
+      : "No symptoms have been reported."
+  );
+  why.push("MindKey compares you with your own baseline, never with population averages.");
+  $("whyList").innerHTML = why.map((w) => `<li>${escapeHtml(w)}</li>`).join("");
+}
 
-  if (latest) {
-    why.push(
-      contextual
-        ? `You reported ${CONTEXT_NOUNS[latest.factor] || latest.label.toLowerCase()} on ${fmtFull(latest.date)} — an everyday explanation that can account for some of the variation.`
-        : `Your most recent check-in (${latest.label.toLowerCase()}, ${fmtFull(latest.date)}) provides context for this period.`
-    );
-  } else {
-    why.push("You haven't completed a check-in recently, so there's no wellbeing context for this period.");
-  }
-
-  if (symptoms.length) {
-    why.push(`You reported ${symptoms.length} symptom${symptoms.length > 1 ? "s" : ""} in the questionnaire: ${symptoms.join("; ")}.`);
-  } else {
-    why.push("No symptoms have been reported, so MindKey has no symptom signal to add.");
-  }
-
-  why.push("MindKey compares you with your own baseline, not with population averages — everyone types differently.");
-  if (state === "alert") {
-    why.push("MindKey only recommends professional evaluation after the change persists across multiple sessions and across multiple signals, never from a single session or a single metric.");
-  }
-
-  $("whyList").innerHTML = why.map((w) => `<li>${w}</li>`).join("");
+function escapeHtml(v) {
+  return String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 /* --------------------------------------------------------------------------

@@ -1161,6 +1161,33 @@ const MK = (() => {
     c.innerHTML = live ? `<span class="lbl">Live data</span>` : `<span class="lbl">Scenario:</span> <strong>${esc(byId(state.scenarioId).title)}</strong>`;
   }
 
+  /* What the Insights page needs, all from the engine's output. */
+  function insightModel() {
+    const p = state.payload;
+    const was = state.replaying;
+    state.replaying = false;
+    const key = dataState(p);
+    state.replaying = was;
+    const r = p && p.report;
+    const hyp = (id) => (r ? (r.hypothesis_assessment.find((h) => h.id === id) || {}).status : null);
+    const ctxIds = new Set(["poor_sleep", "fatigue", "stress", "illness_or_mood", "distraction"]);
+    const supportedContext = r
+      ? r.alternatives.filter((a) => ctxIds.has(a.id) && a.status === "supported").map((a) => a.statement.toLowerCase())
+      : [];
+    const depth = p ? p.evidence.find((e) => e.kind === "persistence_depth") : null;
+    return {
+      key,
+      state: STATES[key],
+      conclusion: p ? p.conclusion : null,
+      contextExplains: hyp("H2") === "supported",
+      contextRuledOut: hyp("H2") === "weakened",
+      supportedContext,
+      depth,
+      contextLines: p ? contextFindings(p).slice(0, -1) : [],
+      events: contextEvents(p),
+    };
+  }
+
   /* Legacy "typing state" (Insights page) derived from the engine conclusion */
   function legacyTypingState() {
     const k = dataState();
@@ -1174,7 +1201,7 @@ const MK = (() => {
     loadScenario, loadLive, savedScenario, applyToDashboard, dataState,
     renderDashboard, drawDashChart, renderInvestigation, renderLab, renderWellbeingContext,
     replayInvestigation, runScenario, markersFor, markerPlugin, initTheme, toggleTheme, scenarioChip,
-    legacyTypingState,
+    legacyTypingState, insightModel,
     setDashMetric(k) { if (DASH_METRICS[k]) { state.dashMetric = k; renderDashboard(); } },
   };
 })();
