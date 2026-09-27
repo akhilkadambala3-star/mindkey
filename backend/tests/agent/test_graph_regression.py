@@ -463,6 +463,7 @@ class Phase4ServiceEquivalenceTests(unittest.TestCase):
 
     def _graph_payload(self, scenario, result):
         from investigation.agent import render_timeline_for
+        from services.investigations import engine_details
 
         report = build_grounded_report(result, clock=frozen_clock)
         timeline = render_timeline_for(report, result, clock=frozen_clock)
@@ -473,6 +474,7 @@ class Phase4ServiceEquivalenceTests(unittest.TestCase):
             "stop_reason": result.stop_reason,
             "evidence_digest": result.evidence_digest,
             "report": report.model_dump(mode="json"),
+            "engine": engine_details(result),
             "timeline": list(timeline),
             "limitations": list(report.limitations),
             "disclaimer": report.disclaimer,

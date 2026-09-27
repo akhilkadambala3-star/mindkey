@@ -23,60 +23,24 @@ const MK = (() => {
 
   /* ------------------------------------------------------------------------
      Scenario catalog — spec names mapped onto the engine's demo datasets.
-     Context events are DEMO check-ins: they are shown on charts and in the
-     Context card, but the engine does not receive them (no check-in store
-     exists server-side yet), which is why it reports sleep/stress as
-     "unavailable".
+     Each scenario's check-ins come with its engine output and are real agent
+     input: the investigation reads the ones in its recent 7-day window.
      ------------------------------------------------------------------------ */
   const SCENARIOS = [
-    {
-      id: "stable", key: "consistent", title: "Stable baseline",
-      blurb: "Thirty days of sessions that stay on the personal baseline.",
-      context: [{ date: "2026-09-21", label: "Normal day", tone: "neutral" }],
-    },
-    {
-      id: "fatigue", key: "recent_variation", title: "Temporary fatigue",
-      blurb: "Typing speed dips for a few days while the user reports poor sleep.",
-      context: [
-        { date: "2026-09-19", label: "Poor sleep" },
-        { date: "2026-09-20", label: "Tired" },
-        { date: "2026-09-21", label: "Poor sleep" },
-        { date: "2026-09-23", label: "Feeling well", tone: "neutral" },
-      ],
-    },
-    {
-      id: "persistent", key: "persistent_change", title: "Persistent change",
-      blurb: "Six signals move together and stay changed across recent sessions.",
-      context: [
-        { date: "2026-09-18", label: "Poor sleep" },
-        { date: "2026-09-20", label: "High stress" },
-        { date: "2026-09-22", label: "Normal day", tone: "neutral" },
-      ],
-    },
-    {
-      id: "sudden", key: "sudden_change", title: "Sudden change",
-      blurb: "A sharp multi-signal shift in only the two most recent sessions.",
-      context: [{ date: "2026-09-22", label: "Traveling" }],
-    },
-    {
-      id: "recovery", key: "recovery", title: "Recovery",
-      blurb: "An earlier week of change that has returned to baseline.",
-      context: [
-        { date: "2026-09-12", label: "Feeling unwell" },
-        { date: "2026-09-14", label: "Tired" },
-        { date: "2026-09-18", label: "Feeling well", tone: "neutral" },
-      ],
-    },
-    {
-      id: "noisy", key: "invalid_data", title: "Noisy data",
-      blurb: "A dense history with one captured session that fails validation.",
-      context: [],
-    },
-    {
-      id: "insufficient", key: "insufficient_history", title: "Insufficient data",
-      blurb: "Only three sessions — below the model's minimum of ten.",
-      context: [],
-    },
+    { id: "stable", key: "consistent", title: "Stable baseline",
+      blurb: "Thirty days on the personal baseline. The user checks in feeling well." },
+    { id: "fatigue", key: "recent_variation", title: "Temporary fatigue",
+      blurb: "Typing speed dips for a few days while the user reports poor sleep and tiredness." },
+    { id: "persistent", key: "persistent_change", title: "Persistent change",
+      blurb: "Six signals shift and stay shifted. The user reports feeling well, so context is ruled out." },
+    { id: "sudden", key: "sudden_change", title: "Sudden change",
+      blurb: "A sharp shift in only the two latest sessions, on a day the user was distracted." },
+    { id: "recovery", key: "recovery", title: "Recovery",
+      blurb: "A week of change while unwell, now back on the baseline." },
+    { id: "noisy", key: "invalid_data", title: "Noisy data",
+      blurb: "A dense history with one captured session that fails validation." },
+    { id: "insufficient", key: "insufficient_history", title: "Insufficient data",
+      blurb: "Only three sessions — below the model's minimum of ten." },
   ];
   const byId = (id) => SCENARIOS.find((s) => s.id === id) || SCENARIOS[2];
 
@@ -147,15 +111,22 @@ const MK = (() => {
 
   function normalize(raw, source) {
     const report = raw.report || null;
-    const evidence = Array.isArray(raw.evidence) ? raw.evidence : [];
+    // Live payloads nest the engine read model under ``engine``; the demo
+    // export carries the same fields at the top level.
+    const eng = raw.engine || raw;
+    const evidence = Array.isArray(eng.evidence) ? eng.evidence : [];
     const sessions = Array.isArray(raw.sessions) ? raw.sessions : [];
-    const fa = raw.final_assessment || (report && report.engine_assessment) || {};
+    const fa = eng.final_assessment || (report && report.engine_assessment) || {};
     const e8 = evidence.find((e) => e.kind === "session_count");
     return {
       raw, source,
       key: raw.key || null,
       title: raw.title || null,
       sessions,
+      checkins: Array.isArray(raw.checkins) ? raw.checkins : [],
+      // The engine counts a signal as "moved" at this relative change
+      // (investigation/adapter.py MOVED_RELATIVE_THRESHOLD).
+      movedThreshold: typeof eng.moved_threshold === "number" ? eng.moved_threshold : 0.1,
       sessionCount: sessions.length || (fa.data_quality && fa.data_quality.total_sessions) || (report ? 1 : 0),
       invalidSessions: sessions.filter((s) => s.is_valid === false).length ||
         Math.max(0, ((fa.data_quality || {}).total_sessions || 0) - ((fa.data_quality || {}).valid_sessions || 0)),
@@ -163,18 +134,18 @@ const MK = (() => {
       conclusion: report ? report.conclusion : { status: "inconclusive", basis: "data_unavailable", statement: "No stored sessions to investigate yet." },
       evidence,
       evidenceById: Object.fromEntries(evidence.map((e) => [e.id, e])),
-      trace: Array.isArray(raw.trace) ? raw.trace : [],
+      trace: Array.isArray(eng.trace) ? eng.trace : [],
       timelineText: Array.isArray(raw.timeline) ? raw.timeline : [],
       finalAssessment: fa,
       dataQuality: fa.data_quality || {},
       persistence: fa.persistence || {},
-      mlEvidence: raw.ml_evidence || null,
-      toolsCalled: raw.tools_called || [],
-      iterations: raw.iterations ?? fa.iterations ?? null,
+      mlEvidence: eng.ml || null,
+      toolsCalled: eng.tools_called || [],
+      iterations: eng.iterations ?? fa.iterations ?? null,
       stopReason: raw.stop_reason || fa.stop_reason || null,
       minimum: e8 ? e8.threshold : 10,
       stopSeq: report && report.link ? report.link.stop_event_seq : null,
-      traceCount: report && report.link ? report.link.trace_event_count : (raw.trace || []).length,
+      traceCount: report && report.link ? report.link.trace_event_count : (eng.trace || []).length,
       critic: report && report.critic_events && report.critic_events[0] ? report.critic_events[0] : null,
     };
   }
@@ -234,10 +205,10 @@ const MK = (() => {
     if (!p || p.source !== "demo" || typeof DemoState === "undefined") return;
     const valid = p.sessions.filter((s) => s.is_valid !== false);
     const stat = (key) => {
-      const e = p.evidence.find((x) => x.kind === "window_stat" && x.window_days === 30 && x.key === key);
+      const e = p.evidence.find((x) => x.kind === "window_stat" && x.window_days === 30 && x.signal === key);
       return e && num(e.value) ? e.value : null;
     };
-    const speed = stat("typing_speed_cpm");
+    const speed = stat("speed");
     DemoState.sessions = p.sessions.map((s) => ({
       ...s,
       duration_s: 20,
@@ -246,11 +217,11 @@ const MK = (() => {
     DemoState.baseline = {
       typing_speed: speed,
       wpm: num(speed) ? Math.round(speed / 5) : null,
-      dwell_mean: stat("dwell_mean_s"),
-      flight_mean: stat("flight_mean_s"),
-      correction_rate: stat("correction_rate"),
-      rhythm_variability: stat("rhythm_variability_s"),
-      pause_count: stat("pause_count"),
+      dwell_mean: stat("dwell"),
+      flight_mean: stat("flight"),
+      correction_rate: stat("corrections"),
+      rhythm_variability: stat("rhythm"),
+      pause_count: stat("pauses"),
       sample_count: valid.length,
       updated_at: p.raw.as_of || null,
     };
@@ -289,7 +260,7 @@ const MK = (() => {
     persistence_not_established: "Persistence has not been established",
     window_robustness_not_assessed: "Window robustness was not assessed",
     window_robustness_disagrees: "Comparison windows disagree",
-    "unanswered:context_factors": "No sleep, stress or fatigue context reaches the agent yet",
+    "unanswered:context_factors": "No recent check-ins on sleep, stress or fatigue",
     "unanswered:capture_change": "Keyboard or device changes cannot be checked",
     cause_not_established: "Behavioral data alone cannot establish a cause",
     insufficient_history: "Not enough history for a reliable baseline",
@@ -300,17 +271,17 @@ const MK = (() => {
     H3: "A sustained shift from the personal baseline",
     H4: "Capture or data problems",
   };
-  const STATUS_WORD = { supported: "Supported", uncertain: "Uncertain", weakened: "Weakened", unavailable: "Unavailable", possible: "Possible" };
+  const STATUS_WORD = { supported: "Supported", uncertain: "Uncertain", weakened: "Weakened", unavailable: "Unavailable", possible: "Possible", partially_evaluated: "Partially evaluated" };
   const human = (s) => String(s || "").replace(/_/g, " ");
 
   /* Signals — display units */
   const SIGNALS = {
-    typing_speed_cpm: { label: "Typing speed", unit: "wpm", fmt: (v) => Math.round(v / 5), metric: "speed" },
-    dwell_mean_s: { label: "Dwell time", unit: "ms", fmt: (v) => Math.round(v * 1000), metric: "dwell" },
-    flight_mean_s: { label: "Flight time", unit: "ms", fmt: (v) => Math.round(v * 1000), metric: "flight" },
-    correction_rate: { label: "Correction rate", unit: "%", fmt: (v) => (Math.round(v * 1000) / 10).toFixed(1), metric: "corrections" },
-    rhythm_variability_s: { label: "Rhythm variability", unit: "s", fmt: (v) => v.toFixed(2), metric: "rhythm" },
-    pause_count: { label: "Pauses", unit: "/ session", fmt: (v) => Math.round(v * 10) / 10, metric: "pauses" },
+    speed: { label: "Typing speed", unit: "wpm", fmt: (v) => Math.round(v / 5), metric: "speed" },
+    dwell: { label: "Dwell time", unit: "ms", fmt: (v) => Math.round(v * 1000), metric: "dwell" },
+    flight: { label: "Flight time", unit: "ms", fmt: (v) => Math.round(v * 1000), metric: "flight" },
+    corrections: { label: "Correction rate", unit: "%", fmt: (v) => (Math.round(v * 1000) / 10).toFixed(1), metric: "corrections" },
+    rhythm: { label: "Rhythm variability", unit: "s", fmt: (v) => v.toFixed(2), metric: "rhythm" },
+    pauses: { label: "Pauses", unit: "/ session", fmt: (v) => Math.round(v * 10) / 10, metric: "pauses" },
   };
   const pct = (r) => (num(r) ? `${r > 0 ? "+" : r < 0 ? "−" : ""}${Math.abs(Math.round(r * 1000) / 10)}%` : "—");
   const arrow = (r) => (!num(r) || r === 0 ? "→" : r > 0 ? "↑" : "↓");
@@ -318,10 +289,10 @@ const MK = (() => {
   function signalRows(p = state.payload) {
     if (!p) return [];
     return p.evidence
-      .filter((e) => e.kind === "signal_change" && SIGNALS[e.key])
+      .filter((e) => e.kind === "signal_change" && SIGNALS[e.signal])
       .map((e) => {
-        const stat7 = p.evidence.find((x) => x.kind === "window_stat" && x.window_days === 7 && x.key === e.key);
-        return { ...e, sig: SIGNALS[e.key], recent7: stat7 ? stat7.value : null, recent7Id: stat7 ? stat7.id : null };
+        const stat7 = p.evidence.find((x) => x.kind === "window_stat" && x.window_days === 7 && x.signal === e.signal);
+        return { ...e, sig: SIGNALS[e.signal], recent7: stat7 ? stat7.value : null, recent7Id: stat7 ? stat7.id : null };
       });
   }
 
@@ -444,10 +415,28 @@ const MK = (() => {
     </div>`;
   }
 
-  function ContextList(sc) {
-    if (!sc || !sc.context.length) return `<p class="mk-muted" style="font-size:13px">No check-ins in this period.</p>`;
-    return `<ul class="mk-context">${sc.context
-      .map((c) => `<li><span class="when">${esc(fmtShort(c.date))}</span><span class="pip ${c.tone === "neutral" ? "neutral" : ""}" aria-hidden="true"></span><span>${esc(c.label)}</span></li>`)
+  const FACTOR_LABELS = {
+    feeling_well: "Feeling well", tired: "Tired", stressed: "Stressed", poor_sleep: "Poor sleep",
+    unwell: "Feeling unwell", distracted: "Distracted / busy", other: "Something else",
+  };
+  const NEUTRAL_FACTORS = new Set(["feeling_well", "other"]);
+
+  /** Check-ins for the loaded data: the scenario's (demo) or the user's (live). */
+  function contextEvents(p = state.payload) {
+    if (!p) return [];
+    const rows = p.source === "demo"
+      ? p.checkins
+      : (typeof getCheckins === "function" ? getCheckins() : []);
+    return (rows || [])
+      .filter((c) => c && c.date && c.factor)
+      .map((c) => ({ date: String(c.date).slice(0, 10), factor: c.factor, label: FACTOR_LABELS[c.factor] || c.label || c.factor, neutral: NEUTRAL_FACTORS.has(c.factor) }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  function ContextList(events) {
+    if (!events.length) return `<p class="mk-muted" style="font-size:13px">No check-ins yet.</p>`;
+    return `<ul class="mk-context">${events
+      .map((c) => `<li><span class="when">${esc(fmtShort(c.date))}</span><span class="pip ${c.neutral ? "neutral" : ""}" aria-hidden="true"></span><span>${esc(c.label)}</span></li>`)
       .join("")}</ul>`;
   }
 
@@ -477,7 +466,7 @@ const MK = (() => {
   function whyFlagged(p = state.payload) {
     if (!p) return { reasons: [], context: [] };
     const reasons = [];
-    const rows = signalRows(p).filter((r) => num(r.relative_change) && r.relative_change !== 0)
+    const rows = signalRows(p).filter((r) => num(r.relative_change) && Math.abs(r.relative_change) >= p.movedThreshold)
       .sort((a, b) => Math.abs(b.relative_change) - Math.abs(a.relative_change));
     for (const r of rows.slice(0, 4)) {
       reasons.push({ text: `${r.sig.label} ${r.relative_change < 0 ? "decreased" : "increased"} ${Math.abs(Math.round(r.relative_change * 1000) / 10)}% vs. your 30-day baseline`, ids: [r.id] });
@@ -491,19 +480,42 @@ const MK = (() => {
     if (!reasons.length && p.report) {
       (p.report.summary || []).slice(0, 3).forEach((s) => reasons.push({ text: s.replace(/\s*\[[^\]]+\]$/, ""), ids: (s.match(/E\d+/g) || []) }));
     }
-    const sc = byId(state.scenarioId);
-    const context = [];
-    const reported = p.source === "demo" ? sc.context.filter((c) => c.tone !== "neutral") : [];
-    if (reported.length) {
-      const names = reported.map((c) => c.label.toLowerCase()).join(", ");
-      context.push(`${names.charAt(0).toUpperCase()}${names.slice(1)} ${reported.length === 1 ? "was" : "were"} reported during this period (demo check-ins). This may explain some of the variation.`);
+    return { reasons, context: contextFindings(p) };
+  }
+
+  /* What the agent concluded about context, in plain words, from its own
+     evidence items and alternative findings. */
+  function contextFindings(p = state.payload) {
+    if (!p) return [];
+    const out = [];
+    const r = p.report;
+    const alts = r ? r.alternatives : [];
+    const ctxIds = new Set(["poor_sleep", "fatigue", "stress", "illness_or_mood", "distraction"]);
+    const ctxAlts = alts.filter((a) => ctxIds.has(a.id));
+    const supported = ctxAlts.filter((a) => a.status === "supported").map((a) => a.statement.toLowerCase());
+    const weakened = ctxAlts.filter((a) => a.status === "weakened");
+    const factors = p.evidence.filter((e) => e.kind === "context_factor");
+    const stable = p.conclusion && p.conclusion.status === "no_deviation";
+
+    if (factors.length) {
+      const parts = factors.map((e) => `${e.label} on ${e.session_count} day${e.session_count === 1 ? "" : "s"}`);
+      out.push(`In the last ${factors[0].window_days} days you reported ${parts.join(", ")}.`);
     }
-    const ctxAbsent = p.evidence.find((e) => e.kind === "context_absence");
-    context.push(ctxAbsent
-      ? "Check-ins are not yet stored server-side, so the agent could not use them to confirm or rule out sleep, stress or fatigue."
-      : "Contextual factors could not be confirmed or ruled out.");
-    context.push("The system cannot determine the cause of a change from behavioral data alone.");
-    return { reasons, context };
+    if (supported.length) {
+      out.push(`The agent treats ${supported.join(" and ")} as a plausible explanation for part of the change.`);
+    } else if (weakened.length && factors.length) {
+      out.push("Because you reported feeling well, the agent weakened sleep, stress and fatigue as explanations.");
+    } else if (stable && factors.length) {
+      out.push("There is no measured change for this context to explain.");
+    }
+    if (p.evidence.some((e) => e.kind === "context_not_reported")) {
+      out.push("No check-ins in the last 7 days, so the agent cannot confirm or rule out sleep, stress or fatigue. A quick check-in helps.");
+    }
+    if (p.evidence.some((e) => e.kind === "context_absence")) {
+      out.push("No check-in store is connected, so the agent cannot confirm or rule out sleep, stress or fatigue.");
+    }
+    out.push("Behavioral data alone cannot determine the cause of a change.");
+    return out;
   }
 
   /* ------------------------------------------------------------------------
@@ -555,11 +567,9 @@ const MK = (() => {
       const i = dayIdx(onset);
       if (i > 0) items.push({ type: "change", index: i, label: p.conclusion.status === "grounded" ? "Change point · persistent" : "Change point" });
     }
-    if (p.source === "demo") {
-      for (const c of byId(state.scenarioId).context) {
-        const i = sessions.findIndex((s) => String(s.session_start || s.date).slice(0, 10) === c.date);
-        if (i >= 0) items.push({ type: "context", index: i, label: c.label });
-      }
+    for (const c of contextEvents(p)) {
+      const i = sessions.findIndex((s) => String(s.session_start || s.date).slice(0, 10) >= c.date);
+      if (i >= 0) items.push({ type: "context", index: i, label: c.label });
     }
     return items;
   }
@@ -568,7 +578,10 @@ const MK = (() => {
     if (typeof Chart === "undefined" || !canvas) return null;
     const labels = sessions.map((s) => fmtShort(s.session_start || s.date));
     const data = sessions.map(get);
-    const ctxEvents = Object.fromEntries((markers || []).filter((m) => m.type === "context").map((m) => [m.index, m.label]));
+    const ctxEvents = {};
+    for (const m of (markers || []).filter((x) => x.type === "context")) {
+      ctxEvents[m.index] = ctxEvents[m.index] ? `${ctxEvents[m.index]}, ${m.label}` : m.label;
+    }
     const flagged = sessions.map((s) => !!(s.anomaly && s.anomaly.is_anomaly));
     const datasets = [{
       label, data,
@@ -607,7 +620,7 @@ const MK = (() => {
                 const i = items[0].dataIndex;
                 const lines = [];
                 if (flagged[i]) lines.push("ML: flagged by Isolation Forest");
-                if (ctxEvents[i]) lines.push(`Check-in (demo): ${ctxEvents[i]}`);
+                if (ctxEvents[i]) lines.push(`Check-in: ${ctxEvents[i]}`);
                 const cp = (markers || []).find((m) => m.type === "change" && m.index === i);
                 if (cp) lines.push(`${cp.label}`);
                 return lines;
@@ -643,8 +656,6 @@ const MK = (() => {
     const p = state.payload;
     const key = dataState();
     const S = STATES[key];
-    const sc = byId(state.scenarioId);
-
     const hero = `
       <section class="mk-hero" aria-labelledby="heroTitle">
         <div>
@@ -687,8 +698,8 @@ const MK = (() => {
       </section>`;
 
     const rows = signalRows(p);
-    const pick = ["typing_speed_cpm", "correction_rate", "pause_count", "rhythm_variability_s"];
-    const cards = pick.map((k) => rows.find((r) => r.key === k)).filter(Boolean);
+    const pick = ["speed", "corrections", "pauses", "rhythm"];
+    const cards = pick.map((k) => rows.find((r) => r.signal === k)).filter(Boolean);
     const overview = cards.length ? `
       <section class="mk-section" aria-labelledby="ovTitle">
         <div class="mk-section-head"><h3 id="ovTitle">Behavioral overview</h3><p class="section-note">Latest session vs. your 30-day personal baseline</p></div>
@@ -714,7 +725,7 @@ const MK = (() => {
 
     const invCard = `
       <div class="mk-card mk-inv-card tone-${S.tone}">
-        <div class="card-head" style="margin-bottom:8px"><h3 class="mk-card-title" style="margin:0">AI investigation</h3>${StatusBadge(key === "STABLE" || key === "MONITORING" ? key : key)}</div>
+        <div class="card-head" style="margin-bottom:8px"><h3 class="mk-card-title" style="margin:0">AI investigation</h3>${StatusBadge(key)}</div>
         <p class="mk-quote">${esc(p.conclusion.statement)}</p>
         <div class="mk-inv-stats">
           <div class="mk-stat"><b>${p.toolsCalled.length + (p.trace.length ? 1 : 0)}</b><span>tool calls</span></div>
@@ -733,11 +744,14 @@ const MK = (() => {
           : `<p class="mk-muted" style="font-size:14px">No meaningful change from your baseline. ${p.invalidSessions ? `${p.invalidSessions} session failed validation and was excluded.` : ""}</p>`}
       </div>`;
 
+    const events = contextEvents(p);
+    const agentView = contextFindings(p).slice(0, -1);
     const context = `
       <div class="mk-card">
-        <div class="card-head" style="margin-bottom:8px"><h3 class="mk-card-title" style="margin:0">Context</h3>${p.source === "demo" ? `<span class="mk-chip mk-chip-demo">Demo check-ins</span>` : ""}</div>
-        ${p.source === "demo" ? ContextList(sc) : `<p class="mk-muted" style="font-size:13px">Your check-ins appear on the Wellbeing page.</p>`}
-        <p class="card-note" style="margin-top:10px">Sleep, stress and fatigue can explain short-term variation. Check-ins are not yet sent to the agent (Planned).</p>
+        <div class="card-head" style="margin-bottom:8px"><h3 class="mk-card-title" style="margin:0">Context</h3>${p.source === "demo" ? `<span class="mk-chip mk-chip-demo">Scenario check-ins</span>` : ""}</div>
+        ${ContextList(events.slice(-5))}
+        ${agentView.length ? `<p class="card-note" style="margin-top:10px"><strong>Agent:</strong> ${esc(agentView.join(" "))}</p>` : ""}
+        <p class="card-note" style="margin-top:6px">Check-ins from the last 7 days are read by the AI investigation — the day and the factor only. Notes stay private.</p>
         <button class="btn btn-ghost btn-sm" data-nav="checkins" style="margin-top:10px">Add a check-in</button>
       </div>`;
 
@@ -890,7 +904,7 @@ const MK = (() => {
         <div class="mk-evx">
           <div class="evx-head"><span>Signal</span><span>Current</span><span>Baseline (30 d)</span><span>Change</span><span></span></div>
           ${sigs.map((s) => {
-            const moved = num(s.relative_change) && s.relative_change !== 0;
+            const moved = num(s.relative_change) && Math.abs(s.relative_change) >= p.movedThreshold;
             const persisted = depth && depth.status === "sustained" && moved;
             return `<details>
               <summary>
@@ -911,7 +925,7 @@ const MK = (() => {
                 <div>
                   <p class="mk-eyebrow" style="margin-bottom:6px">Detected by</p>
                   <ul class="mk-detect">
-                    ${detectRow(moved ? true : false, "Statistical deviation from personal baseline", s.id)}
+                    ${detectRow(moved ? true : false, `Deviation beyond ${Math.round(p.movedThreshold * 100)}% of personal baseline`, s.id)}
                     ${detectRow(anomaly ? (anomaly.status === "true") : null, "Isolation Forest (per-user model)", anomaly ? `${anomaly.id}, trigger session` : "no stored result")}
                     ${detectRow(depth ? !!persisted : null, "Temporal persistence", depth ? `${depth.id} · ${human(depth.status)}` : "not assessed")}
                     ${detectRow(robust ? robust.status === "agrees" : null, "Window robustness", robust ? `${robust.id} · ${human(robust.status)}` : "not assessed")}
@@ -929,7 +943,7 @@ const MK = (() => {
       <section class="mk-card" aria-labelledby="altTitle">
         <h3 id="altTitle" class="mk-card-title">Alternative explanations checked</h3>
         <div class="mk-alts">${r.alternatives.map((a) => `<div class="mk-alt"><span>${esc(a.statement)}</span><span class="st st-text-${esc(a.status)}">${esc(STATUS_WORD[a.status] || human(a.status))}</span></div>`).join("")}</div>
-        <p class="mk-hyp-note" style="margin-top:10px">"Unavailable" means no data source can answer it yet — for example, check-ins are not stored server-side.</p>
+        <p class="mk-hyp-note" style="margin-top:10px">Sleep, fatigue, stress, illness and distraction are decided by your check-ins from the last 7 days. "Unavailable" means no check-in or other data source can answer it; "Partially evaluated" means you checked in without mentioning it.</p>
       </section>` : "";
 
     const decision = r ? `
@@ -1109,13 +1123,17 @@ const MK = (() => {
     const root = el("mkWellbeingContext");
     if (!root) return;
     const p = state.payload;
-    if (!p || p.source !== "demo") { root.innerHTML = ""; return; }
-    const sc = byId(state.scenarioId);
+    const demo = !p || p.source === "demo";
+    const events = contextEvents(p);
+    const findings = p ? contextFindings(p).slice(0, -1) : [];
     root.innerHTML = `
       <div class="mk-card" style="margin-bottom:16px">
-        <div class="card-head" style="margin-bottom:8px"><h3 class="mk-card-title" style="margin:0">Context timeline</h3><span class="mk-chip mk-chip-demo">Demo scenario · ${esc(sc.title)}</span></div>
-        ${ContextList(sc)}
-        <p class="card-note" style="margin-top:10px">These events are overlaid on the Dashboard trend chart, so you can see whether behavior changed around the same time as, for example, poor sleep.</p>
+        <div class="card-head" style="margin-bottom:8px"><h3 class="mk-card-title" style="margin:0">Context timeline</h3>${demo && p ? `<span class="mk-chip mk-chip-demo">Scenario · ${esc(byId(state.scenarioId).title)}</span>` : ""}</div>
+        ${ContextList(events)}
+        ${findings.length ? `<p class="card-note" style="margin-top:10px"><strong>What the agent made of it:</strong> ${esc(findings.join(" "))}</p>` : ""}
+        <p class="card-note" style="margin-top:6px">${demo
+          ? "These are the scenario's check-ins, and the agent read them. Check-ins you add below in demo mode stay in this browser and don't change the scenario."
+          : "The AI investigation reads your check-ins from the last 7 days — the day and the factor only. Notes stay private. Each new check-in re-runs the investigation."}</p>
       </div>`;
   }
 

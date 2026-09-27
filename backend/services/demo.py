@@ -22,6 +22,7 @@ from investigation.context import label_for_factor
 
 from investigation.bridge import is_valid_stored_session
 
+from .investigations import engine_details
 from .reads import _project_session, _row_order
 
 DEMO_PAYLOAD_VERSION = "1.0"
@@ -50,8 +51,6 @@ def scenario_payload(key):
 
     sessions, anomalies, _trigger = DEMO_DATASETS[key]["build"](DEFAULT_AS_OF)
     run = run_demo(key)
-    result = run.result.model_dump(mode="json")
-    state = result.get("state") or {}
     ordered = sorted(sessions, key=_row_order)
 
     return {
@@ -75,15 +74,8 @@ def scenario_payload(key):
             {"date": c["date"], "factor": c["factor"], "label": label_for_factor(c["factor"])}
             for c in demo_checkins(key)
         ],
-        "stop_reason": result.get("stop_reason"),
-        "ml_evidence": state.get("ml_evidence"),
-        "investigation_plan": state.get("investigation_plan") or [],
-        "tools_called": state.get("tools_called") or [],
-        "tool_calls": result.get("tool_calls") or [],
-        "iterations": result.get("iterations"),
-        "final_assessment": result.get("final_assessment") or {},
-        "evidence": state.get("evidence") or [],
-        "trace": state.get("trace") or [],
+        "stop_reason": run.result.stop_reason,
+        **engine_details(run.result),
         "report": run.report.model_dump(mode="json"),
         "timeline": list(run.timeline),
     }

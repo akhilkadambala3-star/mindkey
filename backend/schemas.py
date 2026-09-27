@@ -129,6 +129,7 @@ class InvestigationReadModel(BaseModel):
     stop_reason: str
     evidence_digest: str | None = None
     report: GroundedReport | None = None
+    engine: dict | None = None
     timeline: list[str]
     limitations: list[str]
     disclaimer: str

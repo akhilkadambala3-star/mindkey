@@ -116,3 +116,43 @@ class SupabaseRepositoryCheckinTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OfflinePipelineTests(unittest.TestCase):
+    """Seed the local store, then read everything through the real API."""
+
+    def test_seeded_scenario_runs_end_to_end(self):
+        import io
+        import sys as _sys
+        from contextlib import redirect_stdout
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = LocalClient(Path(tmp) / "t.db")
+            with mock.patch.dict(_sys.modules, {"database": mock.MagicMock(supabase=store)}), \
+                    mock.patch.dict("os.environ", {"MINDKEY_STORE": "local"}):
+                _sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+                import seed_local
+
+                with redirect_stdout(io.StringIO()):
+                    seed_local.main(["--scenario", "recent_variation", "--user", "u-offline"])
+
+                from routes.api import router as api_router
+                from routes.checkins import router as checkin_router
+
+                app = FastAPI()
+                app.include_router(api_router)
+                app.include_router(checkin_router)
+                http = TestClient(app)
+
+                self.assertEqual(len(http.get("/api/users/u-offline/sessions").json()), 34)
+                self.assertEqual(len(http.get("/api/users/u-offline/checkins").json()), 3)
+                inv = http.get("/api/users/u-offline/investigation").json()
+
+        engine = inv["engine"]
+        self.assertTrue(engine["trace"])
+        self.assertIn("speed", {e["signal"] for e in engine["evidence"]})
+        factors = {e["signal"] for e in engine["evidence"] if e["kind"] == "context_factor"}
+        self.assertEqual(factors, {"tired", "poor_sleep"})
+        statuses = {a["id"]: a["status"] for a in inv["report"]["alternatives"]}
+        self.assertEqual(statuses["poor_sleep"], "supported")
+        self.assertEqual(inv["report"]["rejected_claims"], [])

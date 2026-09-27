@@ -374,14 +374,37 @@ async function getAgentStatus() {
   return null;
 }
 
+/* Live check-ins are cached here so views can read them synchronously. */
+let CHECKIN_CACHE = [];
+
+/** Live mode: reload the user's check-ins from the backend (GET). */
+async function refreshCheckins() {
+  if (!API_BASE) return getCheckins();
+  try {
+    const res = await fetch(`${API_BASE}/api/users/${encodeURIComponent(USER_ID)}/checkins`);
+    if (res.ok) {
+      const data = await res.json().catch(() => null);
+      if (Array.isArray(data)) CHECKIN_CACHE = data;
+    }
+  } catch (e) {
+    /* keep the last good cache; the UI stays usable */
+  }
+  return CHECKIN_CACHE;
+}
+
 async function submitCheckin(payload) {
   if (API_BASE) {
-    // await fetch(`${API_BASE}/api/users/${USER_ID}/checkins`, {
-    //   method: "POST",
-    //   headers: { "Content-Type": "application/json" },
-    //   body: JSON.stringify(payload),
-    // });
-    return payload;
+    // Only day, factor and the optional note are sent. The investigation
+    // reads day + factor; the note is stored for the user only.
+    const res = await fetch(`${API_BASE}/api/users/${encodeURIComponent(USER_ID)}/checkins`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date: payload.date, factor: payload.factor, note: payload.note || null }),
+    });
+    if (!res.ok) throw new Error(`check-in not saved (${res.status})`);
+    const saved = await res.json();
+    CHECKIN_CACHE = [...CHECKIN_CACHE, saved];
+    return saved;
   }
   const checkins = store.get(KEYS.checkins, []);
   checkins.push(payload);
@@ -403,7 +426,7 @@ async function submitSymptoms(payload) {
 }
 
 function getCheckins() {
-  return store.get(KEYS.checkins, []);
+  return API_BASE ? CHECKIN_CACHE : store.get(KEYS.checkins, []);
 }
 
 function getSymptoms() {

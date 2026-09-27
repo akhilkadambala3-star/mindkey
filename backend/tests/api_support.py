@@ -60,6 +60,7 @@ INVESTIGATION_KEYS = frozenset(
         "stop_reason",
         "evidence_digest",
         "report",
+        "engine",
         "timeline",
         "limitations",
         "disclaimer",

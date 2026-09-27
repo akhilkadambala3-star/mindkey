@@ -876,13 +876,22 @@ async function submitCheckinFlow() {
   }
   const opt = CHECKIN_OPTIONS.find((o) => o.id === factor);
   const note = $("checkinNote").value.trim();
-  await submitCheckin({
-    user_id: USER_ID,
-    date: new Date().toISOString().slice(0, 10),
-    factor,
-    label: opt.label,
-    note,
-  });
+  const now = new Date();
+  const localDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  try {
+    await submitCheckin({
+      user_id: USER_ID,
+      date: localDay,
+      factor,
+      label: opt.label,
+      note,
+    });
+  } catch (err) {
+    showToast("Your check-in wasn't saved — the backend didn't respond. Try again in a moment.");
+    return;
+  }
+  // Live mode: the investigation reads check-ins, so re-run it now.
+  if (!demoMode()) MK.loadLive().then(() => MK.renderWellbeingContext());
 
   const ctx = $("checkinContext");
   const state = typingState(App.sessions);
@@ -1001,7 +1010,16 @@ function reportedSymptoms() {
 
 function renderInsights() {
   const state = typingState(App.sessions);
-  const checkins = getCheckins();
+  // Demo mode: the loaded scenario's check-ins stand in until the user adds
+  // their own (those stay in this browser).
+  const scenarioCheckins =
+    demoMode() && MK.state.payload
+      ? MK.state.payload.checkins.map((c) => ({
+          ...c,
+          label: (CHECKIN_OPTIONS.find((o) => o.id === c.factor) || {}).label || c.factor,
+        }))
+      : [];
+  const checkins = getCheckins().length ? getCheckins() : scenarioCheckins;
   const latest = checkins.length ? checkins[checkins.length - 1] : null;
   const contextual = latest && ["tired", "stressed", "poor_sleep", "unwell", "distracted"].includes(latest.factor);
   const symptoms = reportedSymptoms();
@@ -1392,16 +1410,16 @@ function onScenarioApplied() {
   if (sel && sel.options.length) sel.value = MK.state.scenarioId;
 }
 
-async function refreshData() {
+async function refreshData({ silent = false } = {}) {
   setLoading(true);
   try {
     const [sessions, baseline] = await Promise.all([getSessions(), getBaseline()]);
     App.sessions = Array.isArray(sessions) ? sessions : [];
     App.baseline = baseline || null;
-    if (!demoMode()) await MK.loadLive();
+    if (!demoMode()) await Promise.all([MK.loadLive(), refreshCheckins()]);
     rerenderCurrentView();
     renderDemoBadge();
-    showToast(demoMode() ? "Demo data refreshed." : "Data refreshed.");
+    if (!silent) showToast(demoMode() ? "Demo data refreshed." : "Data refreshed.");
   } catch (err) {
     // A failed refresh must never leave the dashboard in a broken state.
     showToast("Could not load new data. The current view is unchanged — try again.");
@@ -1574,7 +1592,7 @@ async function init() {
     App.agent.state = "waiting";
     renderSettings();
     setView(viewFromHash(), { fromHash: true });
-    await refreshData();
+    await refreshData({ silent: true });
   }
 }
 
