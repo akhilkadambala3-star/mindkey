@@ -18,6 +18,8 @@ from investigation.agent.demo import (
     run_demo,
 )
 
+from investigation.bridge import is_valid_stored_session
+
 from .reads import _project_session, _row_order
 
 DEMO_PAYLOAD_VERSION = "1.0"
@@ -63,6 +65,7 @@ def scenario_payload(key):
             dict(
                 _project_session(row),
                 anomaly=anomalies.get(row.get("id")),
+                is_valid=bool(is_valid_stored_session(row)),
             )
             for row in ordered
         ],

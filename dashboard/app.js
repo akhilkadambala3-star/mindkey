@@ -17,15 +17,17 @@
 const $ = (id) => document.getElementById(id);
 
 const VIEW_META = {
-  home: ["Home", "Your personal behavioral overview"],
+  home: ["Dashboard", "Your personal behavioral overview"],
+  investigation: ["AI Investigation", "How the agent reached its conclusion — step by step"],
+  lab: ["Demo Lab", "Run a scenario and watch Data → ML → Agent → Insight"],
   trends: ["Trends", "How your typing pattern has changed over time"],
   sessions: ["Sessions", "A record of your analyzed typing sessions"],
-  checkins: ["Check-ins", "Context that helps explain variation"],
+  checkins: ["Wellbeing", "Context that helps explain variation"],
   symptoms: ["Symptom check", "A few additional questions"],
-  insights: ["Health Insights", "What multiple signals are telling us"],
+  insights: ["Insights", "What multiple signals are telling us"],
   care: ["Medical Assistance", "Moving from insight to professional help"],
-  privacy: ["Privacy", "What we collect — and what we never see"],
-  settings: ["Settings", "Profile, data, and preferences"],
+  privacy: ["Privacy Center", "What we collect — and what we never see"],
+  settings: ["Profile & settings", "Profile, data, and preferences"],
 };
 
 const METRICS = {
@@ -181,6 +183,21 @@ const CONTEXT_NOUNS = {
 };
 
 const STATUS_META = {
+  recorded: {
+    label: "Recorded",
+    pill: "pill-neutral",
+    help: "Stored session. Individual sessions are not classified — MindKey only draws conclusions across many sessions.",
+  },
+  ml_flag: {
+    label: "ML flag",
+    pill: "pill-flag",
+    help: "The per-user Isolation Forest model flagged this session as unusual. A flag is not a diagnosis.",
+  },
+  invalid: {
+    label: "Invalid",
+    pill: "pill-invalid",
+    help: "This session failed feature validation and is excluded from the analysis.",
+  },
   normal: {
     label: "Consistent",
     pill: "pill-ok",
@@ -204,6 +221,7 @@ const STATUS_META = {
    -------------------------------------------------------------------------- */
 
 function typingState(sessions) {
+  if (typeof MK !== "undefined" && MK.state.payload) return MK.legacyTypingState();
   const tail = sessions.slice(-8);
   const flagged = tail.filter((s) => s.status === "flagged").length;
   const elevated = tail.filter((s) => s.status === "elevated").length;
@@ -286,8 +304,29 @@ function describeChanges(sessions, rangeDays) {
 
 let firstRender = true;
 
-function setView(name) {
+const VIEW_RENDERERS = () => ({
+  home: renderHome,
+  investigation: () => MK.renderInvestigation(),
+  lab: () => MK.renderLab(),
+  trends: renderTrends,
+  sessions: renderSessions,
+  checkins: renderCheckins,
+  symptoms: renderSymptoms,
+  insights: renderInsights,
+  care: renderCare,
+  privacy: renderPrivacy,
+  settings: renderSettings,
+});
+
+function rerenderCurrentView() {
+  VIEW_RENDERERS()[App.view]();
+}
+
+function setView(name, { fromHash = false } = {}) {
   if (!VIEW_META[name]) name = "home";
+  if (!fromHash && location.hash !== "#/" + name) {
+    history.pushState(null, "", "#/" + name);
+  }
   App.lastView = App.view;
   App.view = name;
 
@@ -307,18 +346,7 @@ function setView(name) {
   $("pageTitle").textContent = title;
   $("pageSubtitle").textContent = subtitle;
 
-  const renderers = {
-    home: renderHome,
-    trends: renderTrends,
-    sessions: renderSessions,
-    checkins: renderCheckins,
-    symptoms: renderSymptoms,
-    insights: renderInsights,
-    care: renderCare,
-    privacy: renderPrivacy,
-    settings: renderSettings,
-  };
-  renderers[name]();
+  VIEW_RENDERERS()[name]();
   window.scrollTo({ top: 0 });
 
   // Move focus to the new view's heading so keyboard and screen-reader users
@@ -411,8 +439,8 @@ function renderAgent() {
 
   // Today tile + the daily-limit copy. Both read the one mirrored constant so
   // the tile, the agent card and the limit message can never drift apart.
-  $("todaySessions").textContent = a.sessionCountToday;
-  $("todaySessionsLimit").textContent = AGENT_DAILY_SESSION_LIMIT;
+  if ($("todaySessions")) $("todaySessions").textContent = a.sessionCountToday;
+  if ($("todaySessionsLimit")) $("todaySessionsLimit").textContent = AGENT_DAILY_SESSION_LIMIT;
   $("agentSessionsLimit").textContent = AGENT_DAILY_SESSION_LIMIT;
 }
 
@@ -501,82 +529,8 @@ function greeting() {
 }
 
 function renderHome() {
-  $("greeting").textContent = greeting();
-  const state = typingState(App.sessions);
-  const panel = $("statusPanel");
-  const icon = $("statusIcon");
-  const headline = $("statusHeadline");
-  const text = $("statusText");
-  const observed = $("statusObserved");
-  const actions = $("statusActions");
-
-  panel.className = "status-panel state-" + state;
-
-  if (state === "ok") {
-    icon.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4.5 13 8 9.5l3 3 8.5-8.5"/></svg>';
-    $("statusEyebrow").textContent = "Behavioral status";
-    headline.textContent = "Your typing pattern is consistent";
-    text.textContent = "No meaningful change has been detected compared with your recent baseline.";
-    observed.hidden = true;
-    actions.innerHTML = `
-      <button class="btn btn-primary" data-nav="trends">View your trends</button>
-      <button class="btn btn-ghost" data-nav="checkins">Complete a check-in</button>`;
-  } else if (state === "warn") {
-    icon.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 4 3.5 19.5h17L12 4Z"/><path d="M12 10v4.5M12 17.2v.1"/></svg>';
-    $("statusEyebrow").textContent = "Behavioral status";
-    headline.textContent = "Some recent variation was detected";
-    text.textContent =
-      "A few recent sessions differ from your usual pattern. MindKey will keep observing before drawing any conclusions — everyday factors like tiredness or stress can cause short-term variation.";
-    observed.hidden = true;
-    actions.innerHTML = `
-      <button class="btn btn-primary" data-nav="checkins">Complete a short check-in</button>
-      <button class="btn btn-ghost" data-nav="trends">View trends</button>`;
-  } else {
-    icon.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4.5 13 8 9.5l3 3 8.5-8.5"/></svg>';
-    $("statusEyebrow").textContent = "Persistent change detected";
-    headline.textContent = "We've noticed a persistent change";
-    text.textContent =
-      "Your typing pattern has remained different from your usual baseline across multiple sessions. Persistent changes can have many possible explanations, including temporary factors — we'd like to understand whether anything else may explain it.";
-    observed.hidden = false;
-    $("statusObservedList").innerHTML = observedChanges()
-      .map((c) => `<li>${c}</li>`)
-      .join("");
-    actions.innerHTML = `
-      <button class="btn btn-primary" data-nav="symptoms">Continue to symptom check</button>
-      <button class="btn btn-ghost" data-nav="insights">View health insight</button>`;
-  }
-
-  // Today snapshot — tolerant of an empty day, a missing baseline, or a
-  // payload that omits a feature. None of these may break the dashboard.
-  const today = App.sessions.filter((s) => isTodayISO(s.session_start));
-  const consistencyValues = today.map((s) => s.consistency).filter(isNumber);
-  const speedValues = today.map((s) => s.wpm).filter(isNumber);
-  const dwellValues = today.map((s) => s.dwell_mean_ms).filter(isNumber);
-  const speed = speedValues.length ? Math.round(mean(speedValues)) : null;
-  const dwell = dwellValues.length ? Math.round(mean(dwellValues)) : null;
-
-  const baseWpm = baselineValue("wpm");
-  const baseDwellSeconds = baselineValue("dwell_mean");
-  const baseDwell = baseDwellSeconds == null ? null : Math.round(baseDwellSeconds * 1000);
-
-  $("todayConsistency").textContent = consistencyValues.length
-    ? Math.round(mean(consistencyValues))
-    : "–";
-  $("todaySpeed").textContent = speed ?? "–";
-  $("todayDwell").textContent = dwell ?? "–";
-  $("todaySpeedSub").textContent =
-    speed == null
-      ? "no sessions today yet"
-      : baseWpm == null
-        ? "no baseline yet"
-        : vsBaseline(speed, baseWpm, "wpm");
-  $("todayDwellSub").textContent =
-    dwell == null
-      ? "no sessions today yet"
-      : baseDwell == null
-        ? "no baseline yet"
-        : vsBaseline(dwell, baseDwell, "ms");
-
+  MK.renderDashboard();
+  MK.scenarioChip();
   renderAgent();
 }
 
@@ -666,18 +620,25 @@ function setChartSummary(sessions, metric, base) {
   const unit = metric.unit ? ` ${metric.unit}` : "";
   const latest = metric.get(sessions[sessions.length - 1]);
   const parts = [
-    `${sessions.length} sessions in the last ${App.range} days.`,
+    `${sessions.length} sessions, ${rangeLabel().toLowerCase()}.`,
     `Latest ${metric.label.toLowerCase()}: ${latest}${unit}.`,
   ];
   if (isNumber(base)) parts.push(`Your baseline: ${base}${unit}.`);
   el.textContent = parts.join(" ");
 }
 
+function rangeLabel() {
+  return App.range >= 9999 ? "All time" : `Last ${App.range} days`;
+}
+
+const cssToken = (name, fallback) =>
+  getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+
 function renderTrends() {
   const metric = METRICS[App.metric];
   $("chartTitle").textContent = metric.label;
-  $("chartSub").textContent = `Last ${App.range} days · ${UNIT_LABELS[metric.unit] || metric.label.toLowerCase()}`;
-  $("whatChangedRange").textContent = `Last ${App.range} days`;
+  $("chartSub").textContent = `${rangeLabel()} · ${UNIT_LABELS[metric.unit] || metric.label.toLowerCase()}`;
+  $("whatChangedRange").textContent = rangeLabel();
 
   // What changed? — data-driven, independent of charts.
   const changes = describeChanges(App.sessions, App.range);
@@ -689,7 +650,7 @@ function renderTrends() {
   }
 
   // Chart. Every exit path tears the previous chart down first.
-  const chartWindow = App.sessions.slice(-App.range);
+  const chartWindow = App.sessions.filter((s) => s.status !== "invalid").slice(-App.range);
   const fallback = $("chartFallback");
 
   if (!App.chartOk) {
@@ -723,7 +684,7 @@ function renderTrends() {
     data,
     baseline,
     unit: metric.unit,
-    color: "#2F6B4F",
+    color: cssToken("--chart-1", "#2F6B4F"),
   });
   setChartSummary(chartWindow, metric, base);
 }
@@ -734,7 +695,7 @@ function buildChart({ sessions, labels, data, baseline, unit, color }) {
   ctx.setAttribute("role", "img");
   ctx.setAttribute(
     "aria-label",
-    `${METRICS[App.metric].label} over the last ${App.range} days, compared with your personal baseline.`
+    `${METRICS[App.metric].label}, ${rangeLabel().toLowerCase()}, compared with your personal baseline.`
   );
 
   const datasets = [
@@ -742,7 +703,7 @@ function buildChart({ sessions, labels, data, baseline, unit, color }) {
       label: "Sessions",
       data,
       borderColor: color,
-      backgroundColor: "rgba(47, 107, 79, 0.05)",
+      backgroundColor: cssToken("--chart-1-fill", "rgba(47, 107, 79, 0.05)"),
       borderWidth: 2,
       pointRadius: 0,
       pointHoverRadius: 4,
@@ -756,7 +717,7 @@ function buildChart({ sessions, labels, data, baseline, unit, color }) {
     datasets.push({
       label: "Your baseline",
       data: baseline,
-      borderColor: "#B9B4A9",
+      borderColor: cssToken("--chart-baseline", "#B9B4A9"),
       borderWidth: 1.5,
       borderDash: [5, 5],
       pointRadius: 0,
@@ -764,9 +725,11 @@ function buildChart({ sessions, labels, data, baseline, unit, color }) {
     });
   }
 
+  const markers = typeof MK !== "undefined" ? MK.markersFor(sessions) : [];
   return new Chart(ctx, {
     type: "line",
     data: { labels, datasets },
+    plugins: typeof MK !== "undefined" ? [MK.markerPlugin] : [],
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -774,11 +737,12 @@ function buildChart({ sessions, labels, data, baseline, unit, color }) {
       interaction: { intersect: false, mode: "index" },
       plugins: {
         legend: { display: false },
+        mkMarkers: { items: markers },
         tooltip: {
-          backgroundColor: "#FFFFFF",
-          titleColor: "#26231D",
-          bodyColor: "#5C584F",
-          borderColor: "#E6E3DC",
+          backgroundColor: cssToken("--surface", "#FFFFFF"),
+          titleColor: cssToken("--text", "#26231D"),
+          bodyColor: cssToken("--text-2", "#5C584F"),
+          borderColor: cssToken("--border", "#E6E3DC"),
           borderWidth: 1,
           padding: 10,
           cornerRadius: 8,
@@ -800,14 +764,14 @@ function buildChart({ sessions, labels, data, baseline, unit, color }) {
       scales: {
         x: {
           grid: { display: false },
-          border: { color: "#E6E3DC" },
-          ticks: { color: "#8B857A", font: { family: "Inter", size: 11 }, maxTicksLimit: 9, maxRotation: 0 },
+          border: { color: cssToken("--border", "#E6E3DC") },
+          ticks: { color: cssToken("--chart-axis", "#8B857A"), font: { family: "Inter", size: 11 }, maxTicksLimit: 9, maxRotation: 0 },
         },
         y: {
-          grid: { color: "#EFEDE7" },
+          grid: { color: cssToken("--chart-grid", "#EFEDE7") },
           border: { display: false },
           ticks: {
-            color: "#8B857A",
+            color: cssToken("--chart-axis", "#8B857A"),
             font: { family: "Inter", size: 11 },
             callback: (v) => (unit ? `${v} ${unit}` : v),
           },
@@ -841,7 +805,7 @@ function renderSessions() {
   $("sessionsEmpty").hidden = list.length > 0;
 
   for (const s of list) {
-    const status = STATUS_META[s.status] || STATUS_META.normal;
+    const status = STATUS_META[s.status] || STATUS_META.recorded;
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td class="td-main" data-label="Date">${fmtFull(s.session_start)}<br><span class="opt">${fmtTime(s.session_start)}</span></td>
@@ -861,6 +825,7 @@ function renderSessions() {
    -------------------------------------------------------------------------- */
 
 function renderCheckins() {
+  MK.renderWellbeingContext();
   const wrap = $("checkinOptions");
   wrap.innerHTML = CHECKIN_OPTIONS.map(
     (o) => `
@@ -1371,10 +1336,13 @@ async function deleteDataFlow() {
 function renderSettings() {
   $("profileName").textContent = "Demo user";
   $("profileId").textContent = USER_ID;
-  $("settingsScenarioSelect").value = DemoState.scenario;
-  $("scenarioSelect").value = DemoState.scenario;
+  const sel = $("settingsScenarioSelect");
+  if (sel && !sel.options.length) {
+    sel.innerHTML = MK.SCENARIOS.map((s) => `<option value="${s.id}">${s.title}</option>`).join("");
+  }
+  if (sel) sel.value = MK.state.scenarioId || "persistent";
   $("demoCard").hidden = !demoMode();
-  $("demoSelectWrap").style.display = demoMode() ? "inline-flex" : "none";
+  MK.scenarioChip();
   renderDemoBadge();
   renderDataSource();
 }
@@ -1406,13 +1374,22 @@ function renderDataSource() {
    Data refresh / scenario switching
    -------------------------------------------------------------------------- */
 
-function applyScenario(key) {
-  setScenario(key);
-  App.sessions = DemoState.sessions;
-  App.baseline = DemoState.baseline;
+async function applyScenario(id) {
+  await MK.loadScenario(id);
+  MK.applyToDashboard();
   App.symptoms = {};
   agentResetDay();
+  onScenarioApplied();
   setView("home");
+}
+
+/** Called whenever the Demo Lab loads a scenario into the dashboard. */
+function onScenarioApplied() {
+  App.sessions = DemoState.sessions;
+  App.baseline = DemoState.baseline;
+  MK.scenarioChip();
+  const sel = $("settingsScenarioSelect");
+  if (sel && sel.options.length) sel.value = MK.state.scenarioId;
 }
 
 async function refreshData() {
@@ -1421,18 +1398,8 @@ async function refreshData() {
     const [sessions, baseline] = await Promise.all([getSessions(), getBaseline()]);
     App.sessions = Array.isArray(sessions) ? sessions : [];
     App.baseline = baseline || null;
-    const renderers = {
-      home: renderHome,
-      trends: renderTrends,
-      sessions: renderSessions,
-      checkins: renderCheckins,
-      symptoms: renderSymptoms,
-      insights: renderInsights,
-      care: renderCare,
-      privacy: renderPrivacy,
-      settings: renderSettings,
-    };
-    renderers[App.view]();
+    if (!demoMode()) await MK.loadLive();
+    rerenderCurrentView();
     renderDemoBadge();
     showToast(demoMode() ? "Demo data refreshed." : "Data refreshed.");
   } catch (err) {
@@ -1475,7 +1442,12 @@ function wire() {
   });
 
   // Topbar
-  $("scenarioSelect").addEventListener("change", (e) => applyScenario(e.target.value));
+  $("themeBtn").addEventListener("click", MK.toggleTheme);
+  window.addEventListener("popstate", () => setView(viewFromHash(), { fromHash: true }));
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-dash-metric]");
+    if (b) MK.setDashMetric(b.dataset.dashMetric);
+  });
   $("refreshBtn").addEventListener("click", refreshData);
 
   // Trends controls
@@ -1526,7 +1498,6 @@ function wire() {
   $("symptomBack").addEventListener("click", () => setView(App.lastView === "symptoms" ? "home" : App.lastView));
 
   // Insights
-  $("insightCareBtn").addEventListener("click", () => setView("care"));
   $("insightTrendsBtn").addEventListener("click", () => setView("trends"));
 
   // Privacy
@@ -1536,23 +1507,16 @@ function wire() {
     if (e.target === $("dataDialog")) $("dataDialog").close();
   });
   $("deleteDataBtn").addEventListener("click", deleteDataFlow);
+  $("exportDataBtn").addEventListener("click", exportDataFlow);
   $("exclusionsBtn").addEventListener("click", () =>
     showToast("Application exclusions are planned — the desktop agent doesn't support per-app filtering yet.")
   );
 
   // Settings
   $("settingsScenarioSelect").addEventListener("change", (e) => applyScenario(e.target.value));
-  $("regenerateBtn").addEventListener("click", () => {
-    setScenario(DemoState.scenario);
-    App.sessions = DemoState.sessions;
-    App.baseline = DemoState.baseline;
-    agentResetDay();
-    renderSettings();
-    showToast("Demo data regenerated.");
-  });
   $("resetDemoBtn").addEventListener("click", async () => {
     await deleteAllData();
-    applyScenario("variation");
+    await applyScenario("persistent");
     showToast("Demo data reset.");
   });
 }
@@ -1561,18 +1525,47 @@ function wire() {
    Init
    -------------------------------------------------------------------------- */
 
+function viewFromHash() {
+  const v = (location.hash || "").replace(/^#\/?/, "");
+  return VIEW_META[v] ? v : "home";
+}
+
+/** Export: downloads what the dashboard currently holds (demo: local data). */
+function exportDataFlow() {
+  const payload = {
+    exported_at: new Date().toISOString(),
+    data_source: demoMode() ? "demo" : "live",
+    user_id: USER_ID,
+    sessions: App.sessions,
+    baseline: App.baseline,
+    checkins: getCheckins(),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "mindkey-export.json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  showToast("Export downloaded — timing features only, no typed content.");
+}
+
 async function init() {
   App.chartOk = typeof Chart !== "undefined";
   wire();
   renderCheckinHistory();
 
   if (demoMode()) {
-    setScenario("variation");
-    App.sessions = DemoState.sessions;
-    App.baseline = DemoState.baseline;
+    renderSettings();
+    MK.state.loading = true;
+    setView(viewFromHash(), { fromHash: true });
+    await MK.loadScenario(MK.savedScenario());
+    MK.applyToDashboard();
+    onScenarioApplied();
     agentResetDay();
     renderSettings();
-    setView("home");
+    rerenderCurrentView();
   } else {
     // Live mode. Start from an honest empty state and load real data — never
     // seed simulated rows here, because they would be shown labelled "live".
@@ -1580,9 +1573,9 @@ async function init() {
     App.baseline = null;
     App.agent.state = "waiting";
     renderSettings();
-    setView("home");
+    setView(viewFromHash(), { fromHash: true });
     await refreshData();
   }
 }
 
-init();
+init();
