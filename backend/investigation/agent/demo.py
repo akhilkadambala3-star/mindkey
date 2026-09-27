@@ -26,6 +26,7 @@ Guarantees
 """
 
 import argparse
+import hashlib
 import json
 import sys
 from dataclasses import dataclass
@@ -72,9 +73,12 @@ class InMemoryRepository:
     mapping code is exercised without touching a database.
     """
 
-    def __init__(self, sessions=None, anomalies=None):
+    def __init__(self, sessions=None, anomalies=None, checkins=None):
         self.sessions = [dict(row) for row in (sessions or [])]
         self.anomalies = dict(anomalies or {})
+        # ``None`` = no check-in store (the original behavior); a list, even
+        # an empty one, = a store that holds these rows.
+        self.checkins = None if checkins is None else [dict(r) for r in checkins]
 
     def list_sessions(self, user_id):
         return [dict(row) for row in self.sessions if row.get("user_id") == user_id]
@@ -83,11 +87,54 @@ class InMemoryRepository:
         row = self.anomalies.get(session_id)
         return dict(row) if row else None
 
+    def list_checkins(self, user_id):
+        if self.checkins is None:
+            return None
+        return [dict(r) for r in self.checkins if r.get("user_id", user_id) == user_id]
+
+
+#: Relative day-to-day jitter applied to demo features, so the synthetic
+#: history looks like real typing instead of flat lines. Deterministic (hashed
+#: from the session id), small enough that no scenario changes outcome.
+_JITTER = {
+    "dwell_mean": 0.04,
+    "flight_mean": 0.04,
+    "typing_speed": 0.03,
+    "correction_rate": 0.06,
+    "rhythm_variability": 0.05,
+}
+
+
+def _unit(session_id, key):
+    """A deterministic value in [-1, 1) for one session and feature."""
+    digest = hashlib.sha256(f"{session_id}:{key}".encode()).digest()
+    return int.from_bytes(digest[:4], "big") / 2**31 - 1.0
+
+
+def _jittered(session_id, features):
+    out = dict(features)
+    for key, amp in _JITTER.items():
+        value = out.get(key)
+        if isinstance(value, (int, float)) and value > 0:
+            places = 4 if value < 1 else 1
+            out[key] = round(value * (1 + amp * _unit(session_id, key)), places)
+    # Pause counts stay integers and unjittered: one pause more or less is a
+    # 25% swing at the baseline of 4, which would cross the 10% moved-signal
+    # threshold on its own and change what a scenario demonstrates.
+    return out
+
 
 def _session(session_id, as_of, days_ago, **features):
-    """One synthetic stored session row, timestamped relative to ``as_of``."""
+    """One synthetic stored session row, timestamped relative to ``as_of``.
+
+    Sessions start between 06:00 and 09:00 UTC, which keeps every session on
+    the same side of the windowed cutoffs as a midnight start would (the
+    reference time is 09:42), while spreading them across the morning.
+    """
+    hour = 6 + int((_unit(session_id, "hour") + 1) * 1.5)
+    minute = int((_unit(session_id, "minute") + 1) * 29.5)
     start = (as_of - timedelta(days=days_ago)).replace(
-        hour=0, minute=0, second=0, microsecond=0
+        hour=hour, minute=minute, second=0, microsecond=0
     )
     end = start + timedelta(seconds=20)
     row = {
@@ -96,9 +143,19 @@ def _session(session_id, as_of, days_ago, **features):
         "session_start": start.isoformat(),
         "session_end": end.isoformat(),
     }
-    row.update(_BASE_FEATURES)
-    row.update(features)
+    merged = dict(_BASE_FEATURES)
+    merged.update(features)
+    row.update(_jittered(session_id, merged))
     return row
+
+
+def _checkin(as_of, days_ago, factor):
+    """One synthetic check-in row, ``days_ago`` days before ``as_of``."""
+    return {
+        "user_id": DEFAULT_USER,
+        "date": (as_of - timedelta(days=days_ago)).date().isoformat(),
+        "factor": factor,
+    }
 
 
 def _consistent(as_of):
@@ -171,6 +228,25 @@ def _recovery(as_of):
         _session(f"R{i:04d}", as_of, i, **_BASE_FEATURES) for i in range(1, 8)
     ]
     return sessions, {}, "R0001"
+
+
+#: Self-reported check-ins per scenario (day offsets from ``as_of``). They are
+#: real engine input: the investigation reads the ones in its recent window.
+_DEMO_CHECKINS = {
+    "consistent": ((3, "feeling_well"),),
+    "recent_variation": ((5, "poor_sleep"), (4, "tired"), (3, "poor_sleep")),
+    "persistent_change": ((4, "feeling_well"), (2, "feeling_well")),
+    "sudden_change": ((2, "distracted"),),
+    "recovery": ((12, "unwell"), (10, "tired"), (3, "feeling_well")),
+    "insufficient_history": (),
+    "invalid_data": (),
+}
+
+
+def demo_checkins(dataset, as_of=None):
+    """The scenario's check-in rows (an empty list means none were reported)."""
+    as_of = DEFAULT_AS_OF if as_of is None else as_of
+    return [_checkin(as_of, days, factor) for days, factor in _DEMO_CHECKINS[dataset]]
 
 
 #: The fixed demo catalog, in a stable order.
@@ -267,7 +343,11 @@ def run_demo(
     clock = (lambda: DEFAULT_AS_OF) if clock is None else clock
 
     sessions, anomalies, session_id = DEMO_DATASETS[dataset]["build"](as_of)
-    repository = InMemoryRepository(sessions=sessions, anomalies=anomalies)
+    repository = InMemoryRepository(
+        sessions=sessions,
+        anomalies=anomalies,
+        checkins=demo_checkins(dataset, as_of),
+    )
 
     result = run_investigation(
         user_id,

@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from routes.api import router as api_router
 from routes.baseline import router as baseline_router
+from routes.checkins import router as checkins_router
 from routes.demo import router as demo_router
 from routes.health import router as health_router
 from routes.supabase_test import router as supabase_test_router
@@ -16,8 +17,8 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Phase 4: read-only API for the dashboard served from :5500. Explicit
-# origin list (never "*") and GET only; no credentials are allowed.
+# Dashboard origins: explicit list (never "*"), no credentials. POST is
+# allowed only for wellbeing check-ins.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -26,7 +27,7 @@ app.add_middleware(
         # Extra deployed dashboard origins (e.g. the Vercel URL), comma separated.
         *[o.strip() for o in os.getenv("MINDKEY_CORS_ORIGINS", "").split(",") if o.strip()],
     ],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -36,3 +37,4 @@ app.include_router(typing_router)
 app.include_router(baseline_router)
 app.include_router(api_router)
 app.include_router(demo_router)
+app.include_router(checkins_router)

@@ -26,6 +26,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from ..context import POSITIVE_FACTOR, candidate_for
 from ..contracts import BehavioralEvidence
 from .evidence import EvidenceRegistry
 from .persistence import PersistenceFinding
@@ -57,8 +58,9 @@ _CANDIDATE_ORDER: dict[str, int] = {
     candidate: index for index, (candidate, _) in enumerate(ALTERNATIVE_CATALOG)
 }
 
-#: The contextual candidates: user-reported circumstances for which no
-#: server-side store exists, so they are always reported as unavailable.
+#: The contextual candidates: user-reported circumstances. Without a check-in
+#: store they are reported as unavailable; with one, self-reported check-ins in
+#: the recent window decide them (see :func:`_assess_context`).
 CONTEXT_CANDIDATES = ("poor_sleep", "fatigue", "stress", "illness_or_mood", "distraction")
 
 
@@ -140,6 +142,69 @@ def _assess_workload(registry, evidence):
         "recent_sampling_comparable_to_baseline",
         evidence_ids,
     )
+
+
+def _assess_context(registry, context_ids, finding):
+    """Decide each contextual candidate from self-reported check-ins.
+
+    - No check-in store: ``unavailable`` (unchanged behavior).
+    - Store, but nothing reported in the window: ``unavailable``, citing the
+      "not reported" item. Silence is not refutation.
+    - The matching factor was reported: ``supported``, citing that report.
+    - Not reported, but the user reported feeling well in the window:
+      ``weakened``, citing the feeling-well report.
+    - Not reported and no feeling-well report: ``partially_evaluated``: the
+      user checked in without naming it, which speaks against it only weakly.
+    - No deviation to explain (stable baseline): ``partially_evaluated``. A
+      report cannot support explaining a change that was not measured.
+    """
+    no_deviation = finding.phase2_status == "stable"
+    factor_items = {
+        item.key: item.id
+        for item in registry.filter(kind="context_factor")
+        if item.kind == "context_factor" and item.key
+    }
+    not_reported = _ids(registry, "context_not_reported")
+    present = _ids(registry, "context_present")
+    by_candidate = {}
+    for factor, item_id in factor_items.items():
+        candidate = candidate_for(factor)
+        if candidate is not None:
+            by_candidate.setdefault(candidate, []).append(item_id)
+    positive = factor_items.get(POSITIVE_FACTOR)
+
+    findings = []
+    for candidate in CONTEXT_CANDIDATES:
+        if not present and not not_reported:
+            findings.append(
+                _finding(candidate, "unavailable", "no_contextual_store", context_ids)
+            )
+        elif not present:
+            findings.append(
+                _finding(candidate, "unavailable", "no_checkins_in_window", not_reported)
+            )
+        elif no_deviation:
+            findings.append(
+                _finding(
+                    candidate,
+                    "partially_evaluated",
+                    "no_deviation_to_explain",
+                    by_candidate.get(candidate) or present,
+                )
+            )
+        elif candidate in by_candidate:
+            findings.append(
+                _finding(candidate, "supported", "reported_in_window", by_candidate[candidate])
+            )
+        elif positive is not None:
+            findings.append(
+                _finding(candidate, "weakened", "reported_feeling_well", [positive])
+            )
+        else:
+            findings.append(
+                _finding(candidate, "partially_evaluated", "not_reported_in_window", present)
+            )
+    return findings
 
 
 def assess_alternatives(
@@ -257,11 +322,8 @@ def assess_alternatives(
         )
     )
 
-    # -- contextual candidates (no store exists) ---------------------------
-    for candidate in CONTEXT_CANDIDATES:
-        findings.append(
-            _finding(candidate, "unavailable", "no_contextual_store", context_ids)
-        )
+    # -- contextual candidates ---------------------------------------------
+    findings.extend(_assess_context(registry, context_ids, finding))
 
     findings.sort(key=lambda item: _CANDIDATE_ORDER[item.candidate])
 

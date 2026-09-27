@@ -15,8 +15,10 @@ from investigation.agent.demo import (
     DEMO_DATASETS,
     DEMO_KEYS,
     DEMO_SCHEMA_VERSION,
+    demo_checkins,
     run_demo,
 )
+from investigation.context import label_for_factor
 
 from investigation.bridge import is_valid_stored_session
 
@@ -68,6 +70,10 @@ def scenario_payload(key):
                 is_valid=bool(is_valid_stored_session(row)),
             )
             for row in ordered
+        ],
+        "checkins": [
+            {"date": c["date"], "factor": c["factor"], "label": label_for_factor(c["factor"])}
+            for c in demo_checkins(key)
         ],
         "stop_reason": result.get("stop_reason"),
         "ml_evidence": state.get("ml_evidence"),

@@ -49,6 +49,7 @@ from typing import Callable, Literal
 
 from pydantic import BaseModel, Field
 
+from ..context import factor_days, label_for_factor
 from ..contracts import BehavioralEvidence, Direction
 from ..tools import MLEvidenceOutput
 
@@ -76,6 +77,8 @@ EvidenceKind = Literal[
     "persistence_robustness",
     "context_absence",
     "context_present",
+    "context_not_reported",
+    "context_factor",
     "tool_unavailable",
     "cadence",
 ]
@@ -315,7 +318,24 @@ def _t_context_present(fields):
     source = fields.get("status") or "unknown"
     return (
         f"User-reported contextual factors are available for this session "
-        f"(source: {source}); they are self-reported and are not diagnostic."
+        f"(source: {source}); they are self-reported context, not measurements."
+    )
+
+
+def _t_context_not_reported(fields):
+    return (
+        f"No check-ins were reported in the last "
+        f"{format_count(fields.get('window_days'))} day(s), so contextual factors "
+        "cannot be confirmed or ruled out for that period."
+    )
+
+
+def _t_context_factor(fields):
+    return (
+        f"The user reported {fields.get('label') or 'a factor'} on "
+        f"{format_count(fields.get('session_count'))} day(s) in the last "
+        f"{format_count(fields.get('window_days'))} day(s) (self-reported "
+        "context, not a measurement)."
     )
 
 
@@ -348,6 +368,8 @@ CLAIM_TEMPLATES: dict[str, Callable[[dict], str]] = {
     "persistence_robustness": _t_persistence_robustness,
     "context_absence": _t_context_absence,
     "context_present": _t_context_present,
+    "context_not_reported": _t_context_not_reported,
+    "context_factor": _t_context_factor,
     "tool_unavailable": _t_tool_unavailable,
     "cadence": _t_cadence,
 }
@@ -693,6 +715,32 @@ def register_from_behavioral_evidence(
                 status=context.source,
             )
         )
+        # One citable item per reported factor, so each contextual
+        # explanation can point at exactly the report that bears on it.
+        window = evidence.temporal_analysis.recent.window_days
+        for factor, days in factor_days(context.checkins).items():
+            items.append(
+                registry.register(
+                    "context_factor",
+                    kind="context_factor",
+                    source_tool=SOURCE_ADAPTER,
+                    key=factor,
+                    label=label_for_factor(factor),
+                    session_count=days,
+                    window_days=window,
+                    status=context.source,
+                )
+            )
+    elif context and context.source and context.source != "unavailable":
+        items.append(
+            registry.register(
+                "context_not_reported",
+                kind="context_not_reported",
+                source_tool=SOURCE_ADAPTER,
+                window_days=evidence.temporal_analysis.recent.window_days,
+                status=context.source,
+            )
+        )
     else:
         items.append(
             registry.register(
@@ -743,6 +791,18 @@ class CachingRepository:
         self._stats["list_sessions"] += 1
         self._sessions[user_id] = [dict(row) for row in (rows or [])]
         return [dict(row) for row in self._sessions[user_id]]
+
+    def list_checkins(self, user_id):
+        """Read-through check-in access (not cached, not counted in stats).
+
+        Returns ``None`` when the wrapped repository has no check-in store, so
+        wrapping never turns "no store" into "no check-ins".
+        """
+        reader = getattr(self._repository, "list_checkins", None)
+        if reader is None:
+            return None
+        rows = reader(user_id)
+        return None if rows is None else [dict(row) for row in rows]
 
     def get_anomaly_result(self, session_id):
         if session_id in self._anomalies:

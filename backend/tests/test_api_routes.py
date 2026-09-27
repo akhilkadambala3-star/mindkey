@@ -404,7 +404,8 @@ class AppWiringTests(unittest.TestCase):
         self.assertIn("http://localhost:5500", origins)
         self.assertNotIn("*", origins)
         methods = [elt.value for elt in keywords["allow_methods"].elts]
-        self.assertEqual(methods, ["GET"])
+        # POST exists only for wellbeing check-ins; nothing deletes or updates.
+        self.assertEqual(methods, ["GET", "POST"])
         self.assertFalse(keywords.get("allow_credentials"))
 
     def test_main_includes_the_api_router(self):
