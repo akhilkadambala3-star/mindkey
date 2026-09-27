@@ -40,6 +40,12 @@ def _capture(argv):
 
 
 class DemoCatalogTests(unittest.TestCase):
+    def test_new_scenarios_reach_expected_outcomes(self):
+        sudden = run_demo("sudden_change")
+        self.assertEqual(sudden.report.conclusion.basis, "deviation_not_persistent")
+        recovery = run_demo("recovery")
+        self.assertNotEqual(recovery.report.conclusion.status, "grounded")
+
     def test_demo_keys_are_fixed(self):
         self.assertEqual(
             DEMO_KEYS,
@@ -47,6 +53,8 @@ class DemoCatalogTests(unittest.TestCase):
                 "consistent",
                 "recent_variation",
                 "persistent_change",
+                "sudden_change",
+                "recovery",
                 "insufficient_history",
                 "invalid_data",
             ),

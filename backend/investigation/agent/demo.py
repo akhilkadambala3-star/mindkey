@@ -147,6 +147,32 @@ def _invalid_data(as_of):
     return sessions, {}, "S0001"
 
 
+def _sudden_change(as_of):
+    """A stable history with a sharp multi-signal shift in the last 2 sessions."""
+    sessions = [
+        _session(f"S{i:04d}", as_of, i, **_BASE_FEATURES) for i in range(3, 36)
+    ]
+    sessions += [
+        _session(f"R{i:04d}", as_of, i, **_DEVIATING_FEATURES) for i in range(1, 3)
+    ]
+    anomalies = {"R0001": {"anomaly_score": 0.71, "is_anomaly": True}}
+    return sessions, anomalies, "R0001"
+
+
+def _recovery(as_of):
+    """An earlier multi-signal shift that has returned to baseline recently."""
+    sessions = [
+        _session(f"S{i:04d}", as_of, i, **_BASE_FEATURES) for i in range(15, 40)
+    ]
+    sessions += [
+        _session(f"D{i:04d}", as_of, i, **_DEVIATING_FEATURES) for i in range(8, 15)
+    ]
+    sessions += [
+        _session(f"R{i:04d}", as_of, i, **_BASE_FEATURES) for i in range(1, 8)
+    ]
+    return sessions, {}, "R0001"
+
+
 #: The fixed demo catalog, in a stable order.
 DEMO_DATASETS = {
     "consistent": {
@@ -165,6 +191,20 @@ DEMO_DATASETS = {
             "A multi-signal recent shift plus an anomaly flag on the trigger."
         ),
         "build": _persistent_change,
+    },
+    "sudden_change": {
+        "title": "Sudden change",
+        "description": (
+            "A sharp multi-signal shift confined to the two most recent sessions."
+        ),
+        "build": _sudden_change,
+    },
+    "recovery": {
+        "title": "Recovery",
+        "description": (
+            "An earlier multi-signal shift that has returned to the baseline."
+        ),
+        "build": _recovery,
     },
     "insufficient_history": {
         "title": "Insufficient history",
