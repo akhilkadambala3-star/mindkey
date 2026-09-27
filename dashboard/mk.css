@@ -616,3 +616,7 @@
 .mk-timeline > li > div { min-width: 0; }
 @media (max-width: 1100px) { #mkInvRight { order: -1; } }
 .mk-arch-boundary { margin-bottom: var(--sp-3); }
+
+/* Toast follows the theme: inverted surface with readable text in both modes */
+.toast { background: var(--text); color: var(--bg); box-shadow: var(--shadow-md); }
+.btn-danger:hover { background: var(--alert-tint); }
