@@ -4,3 +4,4 @@ pydantic
 supabase
 python-dotenv
 scikit-learn
+langgraph==1.2.12

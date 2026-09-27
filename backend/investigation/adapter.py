@@ -129,13 +129,17 @@ def _window_summary(label, window_days, session_count, valid_count, start, end):
     )
 
 
-def build_behavioral_evidence(user_id, session_id, repository=None):
+def build_behavioral_evidence(user_id, session_id, repository=None, *, as_of=None):
     """Build a deterministic :class:`BehavioralEvidence` for one session.
 
     Args:
         user_id: the user whose history is read.
         session_id: the session that triggered the investigation.
         repository: optional read-only repository (tests inject a fake).
+        as_of: optional reference instant for the windowed tool calls. When
+            omitted the tools use the wall clock, exactly as before; passing
+            it makes the evidence reproducible for a fixed reference time
+            (used by the deterministic demo and the engine's injected as_of).
 
     Returns:
         BehavioralEvidence. Missing or unavailable data is represented
@@ -149,21 +153,28 @@ def build_behavioral_evidence(user_id, session_id, repository=None):
     limitations = []
 
     ml = get_ml_evidence(user_id, session_id, repository=repository)
-    recent = get_recent_sessions(user_id, limit=500, repository=repository)
+    recent = get_recent_sessions(
+        user_id, limit=500, repository=repository, as_of=as_of
+    )
     baseline = get_historical_baseline(
-        user_id, window_days=DEFAULT_BASELINE_WINDOW_DAYS, repository=repository
+        user_id,
+        window_days=DEFAULT_BASELINE_WINDOW_DAYS,
+        repository=repository,
+        as_of=as_of,
     )
     drift = calculate_behavioral_drift(
         user_id,
         recent_window_days=DEFAULT_RECENT_WINDOW_DAYS,
         baseline_window_days=DEFAULT_BASELINE_WINDOW_DAYS,
         repository=repository,
+        as_of=as_of,
     )
     windows = compare_time_windows(
         user_id,
         window_a_days=DEFAULT_RECENT_WINDOW_DAYS,
         window_b_days=DEFAULT_BASELINE_WINDOW_DAYS,
         repository=repository,
+        as_of=as_of,
     )
 
     sessions = list(recent.sessions) if recent.available else []

@@ -426,6 +426,7 @@ def _run_tool(ctx, request):
                 limit=args["limit"],
                 window_days=args.get("window_days"),
                 repository=ctx.caching,
+                as_of=ctx.as_of,
             )
         elif tool == "calculate_behavioral_drift":
             result = calculate_behavioral_drift(
@@ -433,6 +434,7 @@ def _run_tool(ctx, request):
                 recent_window_days=args["recent_window_days"],
                 baseline_window_days=args["baseline_window_days"],
                 repository=ctx.caching,
+                as_of=ctx.as_of,
             )
         elif tool == "compare_time_windows":
             result = compare_time_windows(
@@ -440,12 +442,14 @@ def _run_tool(ctx, request):
                 window_a_days=args["window_a_days"],
                 window_b_days=args["window_b_days"],
                 repository=ctx.caching,
+                as_of=ctx.as_of,
             )
         elif tool == "get_historical_baseline":
             result = get_historical_baseline(
                 args["user_id"],
                 window_days=args["window_days"],
                 repository=ctx.caching,
+                as_of=ctx.as_of,
             )
     except RepositoryError:
         result = None
@@ -561,7 +565,10 @@ def _ingest_signal(ctx):
         )
         try:
             evidence = build_behavioral_evidence(
-                ctx.user_id, ctx.session_id, repository=ctx.caching
+                ctx.user_id,
+                ctx.session_id,
+                repository=ctx.caching,
+                as_of=ctx.as_of,
             )
         except (RepositoryError, ValueError):
             evidence = None

@@ -48,6 +48,17 @@ def _ensure_aware(value):
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
+def _reference(as_of=None):
+    """The windowed-analysis reference instant.
+
+    An explicitly injected ``as_of`` (aware, or naive and assumed UTC) pins the
+    windows so that an investigation is reproducible regardless of the wall
+    clock; when it is omitted the wall clock is used exactly as before. This is
+    additive: every existing caller keeps its current behavior.
+    """
+    return _ensure_aware(as_of) or _now()
+
+
 def _within(session, start, end):
     """True when a session's start falls in ``[start, end)``.
 
@@ -199,7 +210,9 @@ class RecentSessionsOutput(BaseModel):
     unavailable_reason: str | None = None
 
 
-def get_recent_sessions(user_id, limit=20, window_days=None, repository=None):
+def get_recent_sessions(
+    user_id, limit=20, window_days=None, repository=None, *, as_of=None
+):
     """Return the most recent sessions, oldest first, in canonical units."""
     params = GetRecentSessionsInput(user_id=user_id, limit=limit, window_days=window_days)
 
@@ -223,7 +236,7 @@ def get_recent_sessions(user_id, limit=20, window_days=None, repository=None):
         )
 
     if params.window_days is not None:
-        cutoff = _now() - timedelta(days=params.window_days)
+        cutoff = _reference(as_of) - timedelta(days=params.window_days)
         sessions = [s for s in sessions if _within(s, cutoff, None)]
 
     floor = datetime.min.replace(tzinfo=timezone.utc)
@@ -262,7 +275,7 @@ class HistoricalBaselineOutput(BaseModel):
     unavailable_reason: str | None = None
 
 
-def get_historical_baseline(user_id, window_days=30, repository=None):
+def get_historical_baseline(user_id, window_days=30, repository=None, *, as_of=None):
     """Compute a per-feature baseline from valid sessions in a time window.
 
     This is a deterministic computation over history, not a stored table. It is
@@ -290,7 +303,7 @@ def get_historical_baseline(user_id, window_days=30, repository=None):
             unavailable_reason=f"unexpected_error: {exc.__class__.__name__}",
         )
 
-    cutoff = _now() - timedelta(days=params.window_days)
+    cutoff = _reference(as_of) - timedelta(days=params.window_days)
     valid = [s for s in sessions if s.is_valid and _within(s, cutoff, None)]
 
     if not valid:
@@ -358,6 +371,8 @@ def calculate_behavioral_drift(
     baseline_window_days=30,
     minimum_samples=3,
     repository=None,
+    *,
+    as_of=None,
 ):
     """Compare a recent window against the equally sized window before it.
 
@@ -393,7 +408,7 @@ def calculate_behavioral_drift(
             unavailable_reason=f"unexpected_error: {exc.__class__.__name__}",
         )
 
-    now = _now()
+    now = _reference(as_of)
     recent_start = now - timedelta(days=params.recent_window_days)
     baseline_start = recent_start - timedelta(days=params.baseline_window_days)
 
@@ -494,7 +509,9 @@ class CompareTimeWindowsInput(BaseModel):
     window_b_days: int = Field(default=30, ge=1, le=3650)
 
 
-def compare_time_windows(user_id, window_a_days=7, window_b_days=30, repository=None):
+def compare_time_windows(
+    user_id, window_a_days=7, window_b_days=30, repository=None, *, as_of=None
+):
     """Compare two adjacent, non-overlapping windows of valid sessions.
 
     Window A is the most recent ``window_a_days``. Window B is the
@@ -521,7 +538,7 @@ def compare_time_windows(user_id, window_a_days=7, window_b_days=30, repository=
             unavailable_reason=f"unexpected_error: {exc.__class__.__name__}",
         )
 
-    now = _now()
+    now = _reference(as_of)
     a_start = now - timedelta(days=params.window_a_days)
     b_start = a_start - timedelta(days=params.window_b_days)
 
