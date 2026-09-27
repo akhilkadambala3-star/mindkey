@@ -27,6 +27,9 @@ app.add_middleware(
         # Extra deployed dashboard origins (e.g. the Vercel URL), comma separated.
         *[o.strip() for o in os.getenv("MINDKEY_CORS_ORIGINS", "").split(",") if o.strip()],
     ],
+    # Vercel gives every branch its own preview URL; a regex (set on the host)
+    # admits exactly this project's deployments without opening up "*".
+    allow_origin_regex=os.getenv("MINDKEY_CORS_ORIGIN_REGEX") or None,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )

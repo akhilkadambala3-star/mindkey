@@ -15,6 +15,7 @@ Only aggregate timing statistics are kept and printed. Keystroke
 identities are never stored, printed, or sent anywhere.
 """
 
+import os
 from datetime import datetime, timezone
 from threading import Lock
 from time import perf_counter, sleep
@@ -24,8 +25,13 @@ from pynput import keyboard
 
 from features import extract_features
 
-TEST_USER_ID = "e1a556fe-eb9b-405a-9859-dca55c715493"
-BACKEND_URL = "http://127.0.0.1:8000/typing/session"
+# Where sessions are sent. Defaults to a backend on this computer; point it at
+# the deployed API with MINDKEY_BACKEND_URL=https://<your-api>.onrender.com
+TEST_USER_ID = os.getenv("MINDKEY_USER_ID", "e1a556fe-eb9b-405a-9859-dca55c715493")
+BACKEND_URL = (
+    os.getenv("MINDKEY_BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
+    + "/typing/session"
+)
 
 # A session runs for exactly this long, counted from its first keypress.
 SESSION_DURATION_S = 20.0

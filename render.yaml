@@ -1,0 +1,26 @@
+# Render Blueprint for the MindKey API (FastAPI backend).
+# Render -> New -> Blueprint -> pick this repo. It reads this file.
+services:
+  - type: web
+    name: mindkey-api
+    runtime: python
+    plan: free
+    region: singapore
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      # Supabase project -> Project Settings -> API. Entered once in Render;
+      # never committed.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      # Dashboard origins allowed to call the API: this Vercel project's
+      # production URL and every preview/branch URL, nothing else.
+      - key: MINDKEY_CORS_ORIGIN_REGEX
+        value: ^https://(mindkey\.vercel\.app|mindkey(-[a-z0-9-]+)?-akhilkadambala3-stars-projects\.vercel\.app)$

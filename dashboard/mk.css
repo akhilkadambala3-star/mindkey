@@ -620,3 +620,7 @@
 /* Toast follows the theme: inverted surface with readable text in both modes */
 .toast { background: var(--text); color: var(--bg); box-shadow: var(--shadow-md); }
 .btn-danger:hover { background: var(--alert-tint); }
+
+/* Settings: connect a live backend */
+.mk-connect { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--hairline); }
+.mk-connect .field input { width: 100%; }

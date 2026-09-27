@@ -1385,7 +1385,56 @@ function renderDataSource() {
   demoDot.className = "dot " + (live ? "dot-muted" : "dot-ok");
   $("dataSourceDemoOpt").textContent = live ? "(inactive)" : "(active)";
   apiDot.className = "dot " + (live ? "dot-ok" : "dot-muted");
-  $("dataSourceApiOpt").textContent = live ? "(active)" : "(not connected)";
+  $("dataSourceApiOpt").textContent = live ? `(active · ${API_BASE})` : "(not connected)";
+  if ($("connectApi") && live) {
+    $("connectApi").value = API_BASE;
+    $("connectUser").value = USER_ID;
+  }
+  if ($("disconnectBtn")) $("disconnectBtn").hidden = !live;
+}
+
+/**
+ * Connect to a live backend: check /health first (a sleeping free host can
+ * take ~50 s to wake), then reload with ?api=&user= so the data layer's
+ * normal precedence stores and applies them.
+ */
+async function connectBackend(e) {
+  e.preventDefault();
+  const status = $("connectStatus");
+  const api = $("connectApi").value.trim().replace(/\/+$/, "");
+  const user = $("connectUser").value.trim();
+  if (!/^https?:\/\//.test(api)) {
+    status.textContent = "Enter the API URL, starting with https://";
+    return;
+  }
+  if (!user) {
+    status.textContent = "Enter the user ID whose data you want to see.";
+    return;
+  }
+  $("connectBtn").disabled = true;
+  status.textContent = "Checking the backend… a free host can take up to a minute to wake up.";
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 75000);
+    const res = await fetch(`${api}/health`, { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(String(res.status));
+    const url = new URL(location.href);
+    url.search = `?api=${encodeURIComponent(api)}&user=${encodeURIComponent(user)}`;
+    url.hash = "#/home";
+    location.assign(url.toString());
+  } catch (err) {
+    status.textContent =
+      "Couldn't reach the backend. Check the URL, and that it allows this site's address (CORS).";
+    $("connectBtn").disabled = false;
+  }
+}
+
+function disconnectBackend() {
+  const url = new URL(location.href);
+  url.search = "?api=demo";
+  url.hash = "#/home";
+  location.assign(url.toString());
 }
 
 /* --------------------------------------------------------------------------
@@ -1461,6 +1510,8 @@ function wire() {
 
   // Topbar
   $("themeBtn").addEventListener("click", MK.toggleTheme);
+  $("connectForm").addEventListener("submit", connectBackend);
+  $("disconnectBtn").addEventListener("click", disconnectBackend);
   window.addEventListener("popstate", () => setView(viewFromHash(), { fromHash: true }));
   document.addEventListener("click", (e) => {
     const b = e.target.closest("[data-dash-metric]");

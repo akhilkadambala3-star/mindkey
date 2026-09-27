@@ -474,6 +474,22 @@
                 The backend serves <strong>sessions</strong>, <strong>baseline</strong>, <strong>check-ins</strong> and the full <strong>investigation</strong> (trace, evidence, hypotheses). The dashboard starts in demo mode; to read live data, run the backend and open the dashboard with <code>?api=http://localhost:8000&amp;user=&lt;your-user-id&gt;</code>. No Supabase? Run the backend with <code>MINDKEY_STORE=local</code>. Agent status, symptoms and delete remain <strong>planned</strong>.</span>
               </li>
             </ul>
+            <form class="mk-connect" id="connectForm" novalidate>
+              <p class="mk-eyebrow">Connect a live backend</p>
+              <label class="field">
+                <span>API URL</span>
+                <input type="url" id="connectApi" placeholder="https://mindkey-api.onrender.com" autocomplete="off" spellcheck="false">
+              </label>
+              <label class="field">
+                <span>User ID</span>
+                <input type="text" id="connectUser" placeholder="the user's UUID" autocomplete="off" spellcheck="false">
+              </label>
+              <p class="mk-muted" id="connectStatus" role="status" aria-live="polite" style="font-size:13px"></p>
+              <div class="btn-row">
+                <button class="btn btn-primary btn-sm" type="submit" id="connectBtn">Connect</button>
+                <button class="btn btn-ghost btn-sm" type="button" id="disconnectBtn">Back to demo data</button>
+              </div>
+            </form>
           </div>
 
           <div class="card">

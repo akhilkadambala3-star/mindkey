@@ -21,6 +21,8 @@ uvicorn main:app --port 8000
 ```
 Then open the dashboard with the `?api=…&user=…` link the seed script prints. The desktop agent (`agent/listener.py`) can post real sessions to this backend too.
 
-**Deployed dashboard talking to a backend:** set `MINDKEY_CORS_ORIGINS=https://<your-app>.vercel.app` on the backend.
+**Deploy the API (Render, free):** Render → New → Blueprint → this repo. `render.yaml` sets everything; Render asks for `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (Supabase → Project Settings → API). CORS already admits this project's Vercel URLs via `MINDKEY_CORS_ORIGIN_REGEX`. Free instances sleep after ~15 minutes idle and take ~50 seconds to wake, so open `/health` a minute before a demo.
+
+**Point the dashboard at it:** Settings → *Connect a live backend* → paste the Render URL and a user ID. **Point the desktop agent at it:** `MINDKEY_BACKEND_URL=https://<api>.onrender.com MINDKEY_USER_ID=<uuid> python agent/listener.py`.
 
 **Tests:** `cd backend && SUPABASE_URL=http://x.invalid SUPABASE_SECRET_KEY=x python -m pytest -q tests`
