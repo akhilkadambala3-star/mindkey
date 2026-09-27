@@ -197,4 +197,12 @@ fields above. That is a hard privacy boundary of the project.
 - **Rendering is defensive.** The dashboard never assumes a baseline, a session
   field, or chart data exists — an empty history, an unconnected backend or a
   partial payload degrade to "no baseline yet" / "no sessions today yet" /
-  fallback notes instead of throwing.
+  fallback notes instead of throwing.
+## v0.4 — AI Investigation, Demo Lab, Privacy Center
+
+- `lab.js` — investigation layer: 8 data states, Demo Lab, AI Investigation page, dashboard views. `mk.css` — design tokens, dark theme, components.
+- Routes are hash-based: `#/home`, `#/investigation`, `#/lab`, `#/trends`, `#/sessions`, `#/checkins`, `#/insights`, `#/privacy`, `#/settings`.
+- Demo scenarios (7) come from the **real investigation engine**. `backend/scripts/export_demo.py` writes `dashboard/demo/<key>.json`; with `?api=` set, the dashboard fetches `GET /api/demo/scenarios/<key>` instead. Loading a scenario feeds its sessions to every view.
+- Live mode (`?api=…&user=…`) renders `GET /api/users/{id}/investigation` on the AI Investigation page, and shows an honest error state if the backend is unreachable.
+- Demo check-ins (sleep, stress…) are shown on charts but are **not** agent input: the agent reports them as "unavailable" until a check-in store exists.
+- Deployed dashboard origin for CORS: set `MINDKEY_CORS_ORIGINS=https://your-app.vercel.app` on the backend.
