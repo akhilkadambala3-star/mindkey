@@ -69,4 +69,5 @@ def extract_features(
         "correction_rate": correction_rate,
         "rhythm_variability": rhythm_variability,
         "pause_count": pause_count,
+        "session_duration": session_duration_s,
     }

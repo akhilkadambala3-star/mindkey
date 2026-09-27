@@ -8,8 +8,8 @@ Design decisions
 - **One notion of "valid session".** Validation is reused from
   ``ml/features.py`` (``is_valid_session`` / ``FEATURE_KEYS``) so the evidence
   layer and the Isolation Forest agree on exactly which sessions count. The
-  ``ml/`` directory is added to ``sys.path`` using the same guarded approach
-  already used by ``backend/routes/typing.py``. ``ml/features.py`` has no
+  repository root is added to ``sys.path`` so ``ml`` resolves as a package,
+  mirroring ``backend/routes/typing.py``. ``ml/features.py`` has no
   third-party imports, so this adds no runtime dependency.
 
 - **Mirrored model minimum.** ``MODEL_MINIMUM_SESSIONS`` mirrors
@@ -35,14 +35,16 @@ logger = logging.getLogger(__name__)
 #: minimum). Mirrored explicitly so reading evidence never imports scikit-learn.
 MODEL_MINIMUM_SESSIONS = 10
 
-# Reuse the ML layer's validation as the single source of truth.
-_ML_DIR = Path(__file__).resolve().parents[2] / "ml"
-if str(_ML_DIR) not in sys.path:
-    sys.path.insert(0, str(_ML_DIR))
+# Reuse the ML layer's validation as the single source of truth. The ML modules
+# live in the repo-root "ml" package and use package-qualified imports, so the
+# repository root must be on sys.path for "ml" to resolve as a package.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 try:  # pragma: no cover - exercised implicitly by every test
-    from features import FEATURE_KEYS as ML_FEATURE_KEYS
-    from features import is_valid_session as _ml_is_valid_session
+    from ml.features import FEATURE_KEYS as ML_FEATURE_KEYS
+    from ml.features import is_valid_session as _ml_is_valid_session
 
     ML_VALIDATION_AVAILABLE = True
 except ImportError:  # pragma: no cover - ml/ is always present in this repo
@@ -107,14 +109,57 @@ def _as_datetime(value):
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+def _session_duration_seconds(session):
+    """Derive the canonical ``session_duration`` feature from stored timestamps.
+
+    Legacy ``typing_sessions`` rows predate the canonical ``session_duration``
+    feature and carry only ``session_start``/``session_end``. This mirrors the
+    derivation already used by ``backend/routes/typing.py``. Returns None when
+    no usable source exists.
+    """
+    value = session.get("session_duration")
+    if value is not None:
+        try:
+            return max(0.0, float(value))
+        except (TypeError, ValueError):
+            return None
+
+    start = _as_datetime(session.get("session_start"))
+    end = _as_datetime(session.get("session_end"))
+    if start is None or end is None:
+        return None
+    return max(0.0, (end - start).total_seconds())
+
+
+def _with_session_duration(session):
+    """Return ``session`` carrying a ``session_duration`` for ML validation.
+
+    A copy is returned so stored rows are never mutated; rows that already
+    carry the field are passed through untouched.
+    """
+    if session.get("session_duration") is not None:
+        return session
+
+    duration = _session_duration_seconds(session)
+    if duration is None:
+        return session
+
+    enriched = dict(session)
+    enriched["session_duration"] = duration
+    return enriched
+
+
 def is_valid_stored_session(row):
     """Return True if a stored session row is usable evidence input.
 
     Delegates to the ML layer's validation so both layers share one definition.
+    Legacy rows without the canonical ``session_duration`` feature have it
+    derived from their timestamps first (mirroring
+    ``backend/routes/typing.py``), so the shared definition applies uniformly.
     """
     if not isinstance(row, dict):
         return False
-    return bool(_ml_is_valid_session(row))
+    return bool(_ml_is_valid_session(_with_session_duration(row)))
 
 
 def to_canonical_session(row):

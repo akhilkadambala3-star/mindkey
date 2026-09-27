@@ -842,6 +842,14 @@ function renderSessions() {
 
   for (const s of list) {
     const status = STATUS_META[s.status] || STATUS_META.normal;
+    // Separate ML indicator — distinct from the baseline status pill and never
+    // folded into it. A score is a number, not a diagnosis.
+    const anomalyBadge =
+      s.is_anomaly === true
+        ? ` <span class="pill pill-warn" title="ML anomaly flag for this session${
+            isNumber(s.anomaly_score) ? ` (score ${s.anomaly_score.toFixed(3)})` : ""
+          }. A score is not a diagnosis.">Anomaly</span>`
+        : "";
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td class="td-main" data-label="Date">${fmtFull(s.session_start)}<br><span class="opt">${fmtTime(s.session_start)}</span></td>
@@ -851,7 +859,7 @@ function renderSessions() {
       <td class="num" data-label="Flight">${isNumber(s.flight_mean_ms) ? `${s.flight_mean_ms} <span class="opt">ms</span>` : "—"}</td>
       <td class="num" data-label="Corrections">${isNumber(s.correction_rate) ? `${Math.round(s.correction_rate * 100)}%` : "—"}</td>
       <td class="num" data-label="Pauses">${isNumber(s.pause_count) ? s.pause_count : "—"}</td>
-      <td data-label="Status"><span class="pill ${status.pill}" title="${status.help}">${status.label}</span></td>`;
+      <td data-label="Status"><span class="pill ${status.pill}" title="${status.help}">${status.label}</span>${anomalyBadge}</td>`;
     tbody.appendChild(tr);
   }
 }
@@ -1418,8 +1426,19 @@ function applyScenario(key) {
 async function refreshData() {
   setLoading(true);
   try {
-    const [sessions, baseline] = await Promise.all([getSessions(), getBaseline()]);
-    App.sessions = Array.isArray(sessions) ? sessions : [];
+    const [sessions, baseline, anomalies] = await Promise.all([
+      getSessions(),
+      getBaseline(),
+      getAnomalies(),
+    ]);
+    // Attach the stored ML anomaly result to each session by id. It is shown
+    // as a separate indicator only; it never changes the baseline status.
+    App.sessions = (Array.isArray(sessions) ? sessions : []).map((s) => {
+      const anomaly = anomalies && anomalies[String(s.session_id)];
+      return anomaly
+        ? { ...s, is_anomaly: anomaly.is_anomaly, anomaly_score: anomaly.anomaly_score }
+        : s;
+    });
     App.baseline = baseline || null;
     const renderers = {
       home: renderHome,

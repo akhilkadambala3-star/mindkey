@@ -25,7 +25,12 @@ from investigation.repository import (
     SessionRepository,
     default_repository,
 )
-from schemas import BaselineReadModel, InvestigationReadModel, SessionReadModel
+from schemas import (
+    AnomalyReadModel,
+    BaselineReadModel,
+    InvestigationReadModel,
+    SessionReadModel,
+)
 from services import investigations, reads
 
 router = APIRouter()
@@ -33,6 +38,7 @@ router = APIRouter()
 #: Fixed, generic 503 details (never echo ids, values, or store errors).
 _SESSIONS_UNAVAILABLE = "Failed to read typing sessions"
 _BASELINE_UNAVAILABLE = "Failed to read baseline"
+_ANOMALIES_UNAVAILABLE = "Failed to read anomaly results"
 _INVESTIGATION_UNAVAILABLE = "Failed to read investigation data"
 
 _USER_ID_REQUIRED = "user_id path must not be empty"
@@ -56,6 +62,14 @@ def get_baseline_client():
     """Dependency: the Supabase client for baseline SELECTs, or ``None``."""
     try:
         return reads.baseline_client()
+    except RepositoryError:
+        return None
+
+
+def get_anomaly_client():
+    """Dependency: the Supabase client for anomaly SELECTs, or ``None``."""
+    try:
+        return reads.anomaly_client()
     except RepositoryError:
         return None
 
@@ -109,6 +123,14 @@ def _default_client_or_503():
         return reads.baseline_client()
     except RepositoryError as exc:
         raise HTTPException(status_code=503, detail=_BASELINE_UNAVAILABLE) from exc
+
+
+def _anomaly_client_or_503():
+    """Construct the production anomaly client; a failure is a generic 503."""
+    try:
+        return reads.anomaly_client()
+    except RepositoryError as exc:
+        raise HTTPException(status_code=503, detail=_ANOMALIES_UNAVAILABLE) from exc
 
 
 @router.get("/api/users/{user_id}/sessions", response_model=list[SessionReadModel])
@@ -184,4 +206,29 @@ def run_user_investigation(
     except RepositoryError:
         raise HTTPException(
             status_code=503, detail=_INVESTIGATION_UNAVAILABLE
+        ) from None
+
+
+@router.get(
+    "/api/users/{user_id}/anomalies",
+    response_model=list[AnomalyReadModel],
+)
+def list_user_anomalies(
+    user_id: str,
+    client: object | None = Depends(get_anomaly_client),
+):
+    """Every stored ML anomaly result for ``user_id`` (read-only).
+
+    One row per stored evaluation (``session_id``, ``anomaly_score``,
+    ``is_anomaly``), echoed verbatim and never interpreted. Unknown users
+    return an empty array; an unreachable store is a 503.
+    """
+    _require_user_id(user_id)
+    if client is None:
+        client = _anomaly_client_or_503()
+    try:
+        return reads.list_anomalies(user_id, client=client)
+    except RepositoryError:
+        raise HTTPException(
+            status_code=503, detail=_ANOMALIES_UNAVAILABLE
         ) from None

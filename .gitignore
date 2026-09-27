@@ -16,3 +16,4 @@ __pycache__/
 Thumbs.db
 
 backend/.env
+.freebuff/

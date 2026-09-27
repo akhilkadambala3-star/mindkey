@@ -195,3 +195,57 @@ def user_baseline(user_id, client=None):
     if not rows:
         return _empty_baseline()
     return _project_baseline(rows[0])
+
+
+def anomaly_client():
+    """The Supabase client used for the read-only anomaly SELECT.
+
+    Imported lazily so this module never requires environment variables at
+    import time; an unavailable client raises ``RepositoryError``.
+    """
+    try:
+        from database import supabase  # noqa: WPS433 (intentional lazy import)
+    except Exception as exc:  # env missing / client construction failed
+        raise RepositoryError(f"Supabase client is unavailable: {exc}") from exc
+    return supabase
+
+
+def list_anomalies(user_id, client=None):
+    """Stored ML anomaly results for ``user_id`` (read-only SELECT).
+
+    One row per stored evaluation: ``session_id``, ``anomaly_score`` and
+    ``is_anomaly``. Values are echoed, never interpreted; a row without a
+    ``session_id`` cannot be attached to a session and is skipped. An
+    unreachable store raises ``RepositoryError``.
+    """
+    if client is None:
+        client = anomaly_client()
+    try:
+        result = (
+            client.table("anomaly_results")
+            .select("*")
+            .eq("user_id", user_id)
+            .execute()
+        )
+    except Exception as exc:
+        raise RepositoryError("Failed to read anomaly results") from exc
+
+    anomalies = []
+    for row in result.data or []:
+        session_id = row.get("session_id")
+        if session_id is None:
+            continue
+        score = row.get("anomaly_score")
+        try:
+            score = None if score is None else float(score)
+        except (TypeError, ValueError):
+            score = None
+        flag = row.get("is_anomaly")
+        anomalies.append(
+            {
+                "session_id": str(session_id),
+                "anomaly_score": score,
+                "is_anomaly": None if flag is None else bool(flag),
+            }
+        )
+    return anomalies

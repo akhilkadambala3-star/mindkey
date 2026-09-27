@@ -227,6 +227,7 @@ def _upload_session(snapshot):
         "correction_rate": features["correction_rate"],
         "rhythm_variability": features["rhythm_variability"],
         "pause_count": features["pause_count"],
+        "session_duration": features["session_duration"],
     }
 
     try:
