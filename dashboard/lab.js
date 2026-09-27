@@ -1022,7 +1022,7 @@ const MK = (() => {
     root.innerHTML = `
       <div class="mk-banner" role="note">
         <span aria-hidden="true">ⓘ</span>
-        <span><b>Demo data, real engine.</b> Each scenario is a set of synthetic typing sessions. The investigation you see is the real MindKey engine (${live ? "fetched live from <code>/api/demo</code>" : "precomputed by <code>backend/scripts/export_demo.py</code>; a test keeps it identical to the engine"}). Nothing here is typed text, and no result is hand-written.</span>
+        <span><b>Demo data, real engine.</b> Each scenario is a set of synthetic typing sessions and check-ins. Every session is scored by the real per-user Isolation Forest, the same way the backend scores new sessions, and the investigation is the real MindKey agent (${live ? "fetched live from <code>/api/demo</code>" : "precomputed by <code>backend/scripts/export_demo.py</code>; a test keeps it identical to the engine"}). Nothing here is typed text, and no result is hand-written.</span>
       </div>
       <section class="mk-section" aria-labelledby="scenTitle">
         <div class="mk-section-head"><h3 id="scenTitle">1 · Choose a scenario</h3></div>

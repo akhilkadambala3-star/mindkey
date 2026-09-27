@@ -290,7 +290,26 @@ def assess_alternatives(
         + _ids(registry, "quality")
         + _ids(registry, "session_count")
     )
-    if unavailable_ids:
+    # A missing ML result is expected, not a failure, while the history is
+    # below the model minimum: production never trains a model then, so no
+    # result is ever stored. That gap is explained by the session count.
+    tool_or_signal_gap = _ids(registry, "tool_unavailable") + _ids(registry, "signal_unavailable")
+    ml_gap_explained = (
+        not tool_or_signal_gap
+        and _ids(registry, "anomaly_unavailable")
+        and not quality.meets_model_minimum
+        and session_ids
+    )
+    if ml_gap_explained:
+        findings.append(
+            _finding(
+                "technical_failure",
+                "weakened",
+                "ml_result_expected_absent_below_model_minimum",
+                session_ids,
+            )
+        )
+    elif unavailable_ids:
         findings.append(
             _finding(
                 "technical_failure",
