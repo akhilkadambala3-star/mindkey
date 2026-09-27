@@ -12,19 +12,36 @@ their fallback values.
 """
 
 import sys
+from datetime import datetime
 from pathlib import Path
 
-_ML_DIR = Path(__file__).resolve().parents[2] / "ml"
-if str(_ML_DIR) not in sys.path:
-    sys.path.insert(0, str(_ML_DIR))
+# The ML layer is the repo-root ``ml`` package (``from ml.… import``), exactly
+# as ``routes/typing.py`` imports it.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 try:
-    from anomaly_detector import MIN_TRAINING_SESSIONS, AnomalyDetector
-    from features import is_valid_session
+    from ml.anomaly_detector import MIN_TRAINING_SESSIONS, AnomalyDetector
+    from ml.features import is_valid_session
 
     ML_AVAILABLE = True
 except ImportError:  # pragma: no cover - depends on the runtime
     ML_AVAILABLE = False
+
+
+def _with_session_duration(row):
+    """Add ``session_duration`` (seconds) from the timestamps, as the
+    production typing route does for stored rows that predate the field."""
+    if row.get("session_duration") is not None:
+        return row
+    try:
+        start = datetime.fromisoformat(str(row["session_start"]))
+        end = datetime.fromisoformat(str(row["session_end"]))
+    except (KeyError, TypeError, ValueError):
+        return row
+    return {**row, "session_duration": max(0.0, (end - start).total_seconds())}
+
 
 #: Label recorded on demo payloads whose ML results come from this replay.
 ML_SOURCE = "isolation_forest_replay"
@@ -42,13 +59,16 @@ def replay_anomalies(sessions):
     ordered = sorted(sessions, key=lambda r: (str(r.get("session_start")), str(r.get("id"))))
     results = {}
     history = []
-    for row in ordered:
+    for raw in ordered:
+        row = _with_session_duration(raw)
         if is_valid_session(row):
             if len(history) >= MIN_TRAINING_SESSIONS:
                 detector = AnomalyDetector()
                 detector.train(history)
                 outcome = detector.evaluate(row)
                 if outcome.get("status") == "ok":
+                    # Stored exactly as production stores it: the raw score
+                    # (higher = more unusual for this user) and the flag.
                     results[row["id"]] = {
                         "anomaly_score": round(float(outcome["anomaly_score"]), 4),
                         "is_anomaly": bool(outcome["is_anomaly"]),

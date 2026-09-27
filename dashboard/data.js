@@ -21,6 +21,7 @@
     GET    /api/users/{user_id}/sessions         implemented (Phase 4)
     GET    /api/users/{user_id}/baseline         implemented (Phase 4)
     GET    /api/users/{user_id}/investigation    implemented (Phase 4)
+    GET    /api/users/{user_id}/anomalies        implemented (read-only ML results)
     GET    /api/agent/status                     planned
     POST   /api/users/{user_id}/checkins         planned
     POST   /api/users/{user_id}/symptoms         planned
@@ -363,6 +364,30 @@ async function getBaseline() {
       : null;
   }
   return DemoState.baseline;
+}
+
+/**
+ * Stored ML anomaly results for the user, keyed by session_id.
+ *
+ * One row per stored evaluation (session_id, anomaly_score, is_anomaly). Demo
+ * mode has no stored anomaly results, so it returns an empty map; a non-array
+ * or error payload is treated as "no anomalies" so a view can never crash on
+ * it. The value is shown as a separate indicator and never folded into the
+ * personal-baseline status.
+ */
+async function getAnomalies() {
+  if (API_BASE) {
+    const res = await fetch(`${API_BASE}/api/users/${USER_ID}/anomalies`);
+    if (!res.ok) return {};
+    const data = await res.json().catch(() => null);
+    if (!Array.isArray(data)) return {};
+    const byId = {};
+    for (const row of data) {
+      if (row && row.session_id != null) byId[String(row.session_id)] = row;
+    }
+    return byId;
+  }
+  return {};
 }
 
 /** Agent status. Planned endpoint — in demo mode the UI runs a local simulator. */

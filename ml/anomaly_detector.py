@@ -1,178 +1,170 @@
-"""Isolation-Forest anomaly detection for MindKey.
+"""
+Isolation Forest anomaly detection for MindKey.
 
-This module trains a per-user model on valid historical typing sessions and
-evaluates a new session for deviation from that user's normal typing
+Purpose
+-------
+Detect sessions that are unusual relative to a user's own historical
 behavior.
 
-Non-goals (explicit):
-- No medical diagnosis. This module never maps an anomaly to any disease
-  (Parkinson's, Alzheimer's, dementia, ...). It only measures deviation from
-  an individual's own typing pattern.
-- No persistence layer and no multi-signal risk assessment yet. Extension
-  points are marked with "EXTENSION POINT" comments so those features can be
-  added later without restructuring this module.
+Important:
+This is behavioral anomaly detection, not medical diagnosis.
 
-Score convention (IMPORTANT):
-- sklearn's ``IsolationForest.score_samples()`` returns a raw score where
-  HIGHER = MORE NORMAL and LOWER = MORE ANOMALOUS.
-- MindKey exposes an application-level ``anomaly_score`` where HIGHER =
-  MORE ANOMALOUS. We therefore transform the raw model output:
-      anomaly_score_raw = -score_samples()
-  and min-max normalize it to [0, 1] against the distribution of the user's
-  own training sessions. The exposed ``anomaly_score`` is thus
-  "more anomalous = higher score", relative to that user's normal range.
-- ``is_anomaly`` is derived from the model's ``decision_function``: a value
-  below 0 marks the session as an outlier.
-
-Modules in this package use flat imports (``from features import ...``) and
-are intended to be run from the ``ml/`` directory, matching the convention
-used by the ``backend/`` and ``agent/`` packages.
+The detector intentionally focuses on one user's historical feature
+distribution. Population-level assumptions are not used here.
 """
 
 import numpy as np
 from sklearn.ensemble import IsolationForest
+from ml.features import validate_features
+import joblib
 
-from features import FEATURE_KEYS, is_valid_session
+from ml.config import (
+    ISOLATION_FOREST_CONTAMINATION,
+    ISOLATION_FOREST_ESTIMATORS,
+    ISOLATION_FOREST_RANDOM_STATE,
+    MINIMUM_BASELINE_SESSIONS,
+)
 
-#: Minimum number of valid historical sessions required to train a model.
-#: 10 valid sessions is a chosen prototype minimum, because very small
-#: samples (e.g. the current test user's 3 sessions) provide only a weak
-#: representation of an individual's normal typing behavior. With fewer
-#: sessions we refuse to train and report an "insufficient data" status.
-MIN_TRAINING_SESSIONS = 10
+from ml.features import (
+    FEATURE_KEYS,
+    is_valid_session,
+)
 
-#: Expected share of anomalous sessions in a user's history under normal
-#: behavior. Prototype assumption used to set the Isolation Forest's
-#: contamination; documented rather than hidden.
-CONTAMINATION = 0.1
+
+# Backwards-compatible name used by the existing tests.
+MIN_TRAINING_SESSIONS = MINIMUM_BASELINE_SESSIONS
+
+CONTAMINATION = ISOLATION_FOREST_CONTAMINATION
 
 
 class InsufficientDataError(Exception):
-    """Raised when a user has fewer valid sessions than MIN_TRAINING_SESSIONS.
-
-    Callers translate this into a clear "insufficient data" status for the
-    user, including how many sessions are available and how many are needed.
-    """
+    """Raised when there are not enough valid sessions for training."""
 
 
 class AnomalyDetector:
-    """Detects deviation of a typing session from a user's normal behavior.
+    """
+    Per-user Isolation Forest anomaly detector.
 
-    Attributes:
-        available_sessions: number of valid sessions seen by the most recent
-            ``train()`` call (recorded even when training fails, so callers
-            can report how much data exists).
+    Training:
+        Historical valid sessions are used to construct the user's
+        behavioral reference distribution.
+
+    Evaluation:
+        A new session is scored against that learned distribution.
+
+    Score convention:
+        sklearn's score_samples() is higher for more normal observations.
+        MindKey negates that score so larger anomaly_score means
+        greater behavioral unusualness.
+
+    The normalized anomaly score is scaled to [0, 1] relative to the
+    training distribution.
     """
 
-    def __init__(self, contamination=CONTAMINATION, random_state=42):
+    def __init__(
+        self,
+        contamination=CONTAMINATION,
+        random_state=ISOLATION_FOREST_RANDOM_STATE,
+    ):
         self._contamination = contamination
         self._random_state = random_state
+
         self._model = None
-        # Bounds of the transformed training scores, used to min-max
-        # normalize anomaly_score to [0, 1] against the user's own range.
+
         self._train_anomaly_min = None
         self._train_anomaly_max = None
+
         self.available_sessions = 0
 
-    @property
-    def is_trained(self):
-        """True once ``train()`` has successfully fitted a model."""
-        return self._model is not None
+    # ------------------------------------------------------------------
+    # Training
+    # ------------------------------------------------------------------
 
     def train(self, sessions):
-        """Fit the Isolation Forest on valid historical sessions.
-
-        Args:
-            sessions: iterable of typing-session dicts for one user, as
-                stored by the backend. Invalid sessions are filtered out via
-                ``is_valid_session``.
-
-        Returns:
-            A summary dict with ``status`` ("trained") and ``sample_count``.
-
-        Raises:
-            InsufficientDataError: if fewer than ``MIN_TRAINING_SESSIONS``
-                valid sessions are available. ``available_sessions`` is set
-                on the detector either way so callers can report the count.
-
-        Notes:
-            - The model learns what "normal" looks like for THIS user from
-              their own history only; it never compares users to each other.
-            - ``random_state`` is fixed so results are reproducible.
         """
-        valid_sessions = [s for s in sessions if is_valid_session(s)]
-        self.available_sessions = len(valid_sessions)
+        Train the detector on historical sessions.
 
-        if self.available_sessions < MIN_TRAINING_SESSIONS:
+        Invalid sessions are ignored.
+
+        Returns
+        -------
+        dict
+            Training status and number of valid samples used.
+        """
+
+        valid_sessions = [
+            session
+            for session in sessions
+            if is_valid_session(session)
+        ]
+
+        self.available_sessions = len(
+            valid_sessions
+        )
+
+        if (
+            self.available_sessions
+            < MIN_TRAINING_SESSIONS
+        ):
             raise InsufficientDataError(
-                f"Only {self.available_sessions} valid session(s) available; "
-                f"at least {MIN_TRAINING_SESSIONS} valid historical sessions "
-                "are required to train (a chosen prototype minimum: very "
-                "small samples provide only a weak representation of an "
-                "individual's normal typing behavior)."
+                f"Need at least "
+                f"{MIN_TRAINING_SESSIONS} valid sessions "
+                f"for training; received "
+                f"{self.available_sessions}."
             )
 
-        feature_matrix = self._to_feature_matrix(valid_sessions)
+        X = self._to_feature_matrix(
+            valid_sessions
+        )
 
-        model = IsolationForest(
-            n_estimators=100,
+        self._model = IsolationForest(
+            n_estimators=(
+                ISOLATION_FOREST_ESTIMATORS
+            ),
             contamination=self._contamination,
             random_state=self._random_state,
         )
-        model.fit(feature_matrix)
 
-        # Record the transformed-score distribution of the training set so
-        # future sessions can be min-max normalized to [0, 1] against the
-        # user's own normal range. The transformation flips the sklearn
-        # convention (score_samples: higher = more normal) so that our
-        # anomaly_score is higher = more anomalous.
-        training_raw_scores = -model.score_samples(feature_matrix)
-        self._train_anomaly_min = float(np.min(training_raw_scores))
-        self._train_anomaly_max = float(np.max(training_raw_scores))
-        self._model = model
+        self._model.fit(X)
 
-        # EXTENSION POINT (persistence): persist self._model (e.g. with
-        # joblib) keyed by user_id here, and load an existing model instead
-        # of retraining when a persistence check finds one.
+        raw_scores = self._model.score_samples(X)
+
+        # Higher values should represent more anomalous behavior.
+        anomaly_scores = -raw_scores
+
+        self._train_anomaly_min = float(
+            np.min(anomaly_scores)
+        )
+
+        self._train_anomaly_max = float(
+            np.max(anomaly_scores)
+        )
+
         return {
             "status": "trained",
             "sample_count": self.available_sessions,
-            "message": f"Model trained on {self.available_sessions} valid sessions.",
         }
 
+    # ------------------------------------------------------------------
+    # Evaluation
+    # ------------------------------------------------------------------
+
     def evaluate(self, session):
-        """Score a single new typing session against the trained model.
-
-        Args:
-            session: a typing-session dict, as stored by the backend.
-
-        Returns:
-            A dict:
-            - ``status``: "ok" when a model is trained and the session is
-              valid; "insufficient_data" when no model has been trained yet
-              (not enough historical data); "invalid_session" when the
-              session fails validation.
-            - ``anomaly_score``: float in [0, 1], HIGHER = MORE ANOMALOUS,
-              min-max normalized against the user's training range.
-            - ``anomaly_score_raw``: the untransformed ``-score_samples()``
-              value, kept for debugging/verification of the transformation.
-            - ``is_anomaly``: bool, True when the session deviates from the
-              user's normal typing behavior.
-            - ``message`` plus, for the insufficient-data status,
-              ``available_sessions`` and ``required_sessions``.
         """
-        if not self.is_trained:
+        Evaluate one session against the trained model.
+
+        Returns
+        -------
+        dict
+            Structured anomaly result.
+        """
+
+        if self._model is None:
             return {
                 "status": "insufficient_data",
-                "available_sessions": self.available_sessions,
-                "required_sessions": MIN_TRAINING_SESSIONS,
                 "message": (
-                    "Not enough valid typing sessions to build a reliable "
-                    f"model. At least {MIN_TRAINING_SESSIONS} valid "
-                    "historical sessions are required (a chosen prototype "
-                    "minimum: very small samples provide only a weak "
-                    "representation of an individual's normal typing "
-                    "behavior)."
+                    "The anomaly detector has not "
+                    "been trained yet."
                 ),
             }
 
@@ -180,55 +172,160 @@ class AnomalyDetector:
             return {
                 "status": "invalid_session",
                 "message": (
-                    "Session is missing required features or has values "
-                    "outside the expected ranges."
+                    "Session failed ML validation."
                 ),
             }
 
-        feature_vector = self._to_feature_matrix([session])
-        # score_samples(): higher = more normal. Negate so higher = more
-        # anomalous, then normalize to [0, 1] against the user's own range.
-        raw_anomaly_score = float(-self._model.score_samples(feature_vector)[0])
-        anomaly_score = self._normalize_anomaly_score(raw_anomaly_score)
-        # decision_function(): values below 0 mark outliers.
-        is_anomaly = bool(self._model.decision_function(feature_vector)[0] < 0)
+        X = self._to_feature_matrix(
+            [session]
+        )
 
-        # EXTENSION POINT (multi-signal risk assessment): combine this
-        # typing-anomaly signal with other signals (e.g. survey responses,
-        # appointment data) in a later risk-assessment layer.
+        raw_score = float(
+            self._model.score_samples(X)[0]
+        )
+
+        anomaly_score = -raw_score
+
+        normalized_score = (
+            self._normalize_score(
+                anomaly_score
+            )
+        )
+
+        decision = float(
+            self._model.decision_function(X)[0]
+        )
+
+        is_anomaly = decision < 0
+
         return {
             "status": "ok",
             "anomaly_score": anomaly_score,
-            "anomaly_score_raw": raw_anomaly_score,
+            "normalized_anomaly_score": (
+                normalized_score
+            ),
             "is_anomaly": is_anomaly,
-            "message": "Anomalous session" if is_anomaly else "Normal session",
+            "message": (
+                "Session is behaviorally unusual "
+                "relative to the user's training "
+                "distribution."
+                if is_anomaly
+                else
+                "Session is within the learned "
+                "behavioral distribution."
+            ),
         }
 
-    def _normalize_anomaly_score(self, raw_anomaly_score):
-        """Min-max normalize a transformed score to [0, 1] against training.
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
-        Bounds come from the user's own training distribution, so the score
-        expresses how anomalous a session is relative to that user's normal
-        range. Values outside the training range clamp to 0.0 / 1.0.
-
-        Degenerate case: if all training sessions were identical the training
-        range has zero span, and any session that differs at all is scored as
-        maximally anomalous (1.0); identical sessions score 0.0.
+    def _to_feature_matrix(self, sessions):
         """
-        if self._train_anomaly_min is None or self._train_anomaly_max is None:
-            return None
+        Convert sessions into a matrix using the canonical feature order.
+        """
 
-        span = self._train_anomaly_max - self._train_anomaly_min
-        if span <= 0:
-            return 1.0 if raw_anomaly_score > self._train_anomaly_max else 0.0
-
-        normalized = (raw_anomaly_score - self._train_anomaly_min) / span
-        return float(np.clip(normalized, 0.0, 1.0))
-
-    @staticmethod
-    def _to_feature_matrix(sessions):
-        """Build the fixed-order float feature matrix from session dicts."""
         return np.array(
-            [[session[key] for key in FEATURE_KEYS] for session in sessions],
+            [
+                [
+                    float(session[key])
+                    for key in FEATURE_KEYS
+                ]
+                for session in sessions
+            ],
             dtype=float,
+        )
+
+        # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def save(self, path):
+        """
+        Save the trained detector to disk.
+        """
+
+        if self._model is None:
+            raise ValueError(
+                "Cannot save an untrained detector."
+            )
+
+        artifact = {
+            "model": self._model,
+            "train_anomaly_min": self._train_anomaly_min,
+            "train_anomaly_max": self._train_anomaly_max,
+            "available_sessions": self.available_sessions,
+            "feature_keys": FEATURE_KEYS,
+        }
+
+        joblib.dump(
+            artifact,
+            path,
+        )
+
+    @classmethod
+    def load(cls, path):
+        """
+        Load a previously trained detector from disk.
+        """
+
+        artifact = joblib.load(path)
+
+        if artifact["feature_keys"] != FEATURE_KEYS:
+            raise ValueError(
+                "Saved model feature schema does not match "
+                "the current feature schema."
+            )
+
+        detector = cls()
+
+        detector._model = artifact["model"]
+
+        detector._train_anomaly_min = (
+            artifact["train_anomaly_min"]
+        )
+
+        detector._train_anomaly_max = (
+            artifact["train_anomaly_max"]
+        )
+
+        detector.available_sessions = (
+            artifact["available_sessions"]
+        )
+
+        return detector
+
+    
+    def _normalize_score(self, anomaly_score):
+        """
+        Normalize an anomaly score to [0, 1].
+
+        Normalization is relative to the training distribution.
+        """
+
+        if (
+            self._train_anomaly_min is None
+            or self._train_anomaly_max is None
+        ):
+            return 0.0
+
+        score_range = (
+            self._train_anomaly_max
+            - self._train_anomaly_min
+        )
+
+        if score_range <= 0:
+            return 0.0
+
+        normalized = (
+            anomaly_score
+            - self._train_anomaly_min
+        ) / score_range
+
+        return float(
+            np.clip(
+                normalized,
+                0.0,
+                1.0,
+            )
         )

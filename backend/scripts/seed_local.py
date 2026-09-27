@@ -11,7 +11,8 @@ live mode:
 
 What it writes (all synthetic, from the engine's demo catalog):
 - the scenario's typing sessions, shifted so the latest one is today,
-- the stored ML anomaly results for them,
+- the ML anomaly results the real Isolation Forest gives them (replayed in
+  order, as the typing route would have stored them),
 - the scenario's check-ins (same shift),
 - the personal baseline, computed by the real /baseline route logic.
 
@@ -64,6 +65,12 @@ def main(argv=None):
         parser.error(f"unknown scenario; choose from {', '.join(DEMO_DATASETS)}")
 
     sessions, anomalies, _ = DEMO_DATASETS[args.scenario]["build"](DEFAULT_AS_OF)
+    # Score every session with the real model, as production would have.
+    from services.ml_replay import replay_anomalies
+
+    replayed = replay_anomalies(sessions)
+    if replayed is not None:
+        anomalies = replayed
     checkins = demo_checkins(args.scenario)
 
     # Shift whole days so the scenario's reference time lands on "now".

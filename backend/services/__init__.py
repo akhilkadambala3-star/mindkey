@@ -9,18 +9,22 @@ investigation outcome comes verbatim from ``investigation.agent``.
 
 from .investigations import SessionNotFound, run_for_user
 from .reads import (
+    anomaly_client,
     baseline_client,
     latest_session_id,
     latest_session_id_for,
+    list_anomalies,
     list_sessions,
     user_baseline,
 )
 
 __all__ = [
     "SessionNotFound",
+    "anomaly_client",
     "baseline_client",
     "latest_session_id",
     "latest_session_id_for",
+    "list_anomalies",
     "list_sessions",
     "run_for_user",
     "user_baseline",

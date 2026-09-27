@@ -212,7 +212,7 @@ const MK = (() => {
     DemoState.sessions = p.sessions.map((s) => ({
       ...s,
       duration_s: 20,
-      status: s.is_valid === false ? "invalid" : s.anomaly && s.anomaly.is_anomaly ? "ml_flag" : undefined,
+      status: s.is_valid === false ? "invalid" : undefined,
     }));
     DemoState.baseline = {
       typing_speed: speed,

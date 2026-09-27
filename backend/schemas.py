@@ -27,6 +27,10 @@ class TypingSessionCreate(BaseModel):
     correction_rate: float
     rhythm_variability: float
     pause_count: int
+    # Canonical ML feature. Not a stored ``typing_sessions`` column, so the
+    # route keeps it out of the insert and derives it from the timestamps for
+    # rows stored before this field existed.
+    session_duration: float | None = None
 
 
 class AnomalyResult(BaseModel):
@@ -112,6 +116,20 @@ class BaselineReadModel(BaseModel):
     wpm: float | None = None
     sample_count: int = 0
     updated_at: str | None = None
+
+
+class AnomalyReadModel(BaseModel):
+    """One stored ML anomaly result (dashboard contract, null-safe).
+
+    Emitted by the additive ``/api/users/{user_id}/anomalies`` read endpoint.
+    ``anomaly_score`` (higher = more anomalous) and ``is_anomaly`` are echoed
+    verbatim from the store; they are never interpreted as a condition, and a
+    missing value stays ``None``.
+    """
+
+    session_id: str
+    anomaly_score: float | None = None
+    is_anomaly: bool | None = None
 
 
 class InvestigationReadModel(BaseModel):

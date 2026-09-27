@@ -806,6 +806,15 @@ function renderSessions() {
 
   for (const s of list) {
     const status = STATUS_META[s.status] || STATUS_META.recorded;
+    // Separate ML indicator — distinct from the status pill and never folded
+    // into it. A score is a number, not a diagnosis.
+    const ml = s.anomaly || (s.is_anomaly != null ? { is_anomaly: s.is_anomaly, anomaly_score: s.anomaly_score } : null);
+    const anomalyBadge =
+      ml && ml.is_anomaly === true
+        ? ` <span class="pill pill-flag" title="The per-user Isolation Forest flagged this session${
+            isNumber(ml.anomaly_score) ? ` (score ${Number(ml.anomaly_score).toFixed(2)})` : ""
+          }. A score is not a diagnosis.">ML flag</span>`
+        : "";
     const tr = document.createElement("tr");
     tr.className = "mk-session-row";
     tr.tabIndex = 0;
@@ -826,7 +835,7 @@ function renderSessions() {
       <td class="num" data-label="Flight">${isNumber(s.flight_mean_ms) ? `${Math.round(s.flight_mean_ms)} <span class="opt">ms</span>` : "—"}</td>
       <td class="num" data-label="Corrections">${isNumber(s.correction_rate) ? `${Math.round(s.correction_rate * 100)}%` : "—"}</td>
       <td class="num" data-label="Pauses">${isNumber(s.pause_count) ? s.pause_count : "—"}</td>
-      <td data-label="Status"><span class="pill ${status.pill}" title="${status.help}">${status.label}</span></td>`;
+      <td data-label="Status"><span class="pill ${status.pill}" title="${status.help}">${status.label}</span>${anomalyBadge}</td>`;
     tbody.appendChild(tr);
   }
 }
@@ -1140,7 +1149,7 @@ function openSessionDialog(s) {
   const mlLine = invalid
     ? "Not scored: this session failed validation."
     : ml
-      ? `Isolation Forest score ${Number(ml.anomaly_score).toFixed(2)} (0 = typical for you, 1 = most unusual). ${ml.is_anomaly ? "Flagged as unusual for you." : "Within your normal range."}`
+      ? `Isolation Forest anomaly score ${Number(ml.anomaly_score).toFixed(2)} (higher means more unusual for you). ${ml.is_anomaly ? "Flagged as unusual for you." : "Within your normal range."}`
       : "Not scored: the model trains once there are at least 10 earlier valid sessions.";
 
   const day = String(s.session_start || s.date || "").slice(0, 10);
@@ -1507,8 +1516,24 @@ function onScenarioApplied() {
 async function refreshData({ silent = false } = {}) {
   setLoading(true);
   try {
-    const [sessions, baseline] = await Promise.all([getSessions(), getBaseline()]);
-    App.sessions = Array.isArray(sessions) ? sessions : [];
+    const [sessions, baseline, anomalies] = await Promise.all([
+      getSessions(),
+      getBaseline(),
+      getAnomalies(),
+    ]);
+    // Attach the stored ML anomaly result to each session by id. It is shown
+    // as a separate indicator only; it never changes the baseline status.
+    App.sessions = (Array.isArray(sessions) ? sessions : []).map((s) => {
+      const anomaly = anomalies && anomalies[String(s.session_id)];
+      return anomaly
+        ? {
+            ...s,
+            is_anomaly: anomaly.is_anomaly,
+            anomaly_score: anomaly.anomaly_score,
+            anomaly: { is_anomaly: anomaly.is_anomaly, anomaly_score: anomaly.anomaly_score },
+          }
+        : s;
+    });
     App.baseline = baseline || null;
     if (!demoMode()) await Promise.all([MK.loadLive(), refreshCheckins()]);
     rerenderCurrentView();

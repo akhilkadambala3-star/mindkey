@@ -20,7 +20,12 @@ from fastapi import HTTPException
 from investigation.agent import REPORT_DISCLAIMER
 from investigation.repository import RepositoryError
 from routes import api
-from schemas import BaselineReadModel, InvestigationReadModel, SessionReadModel
+from schemas import (
+    AnomalyReadModel,
+    BaselineReadModel,
+    InvestigationReadModel,
+    SessionReadModel,
+)
 from tests import fixtures
 from tests.agent.scenarios import clinical_terms_in
 from tests.api_support import (
@@ -38,9 +43,11 @@ USER = fixtures.DEFAULT_USER
 SESSIONS_PATH = "/api/users/{user_id}/sessions"
 BASELINE_PATH = "/api/users/{user_id}/baseline"
 INVESTIGATION_PATH = "/api/users/{user_id}/investigation"
+ANOMALIES_PATH = "/api/users/{user_id}/anomalies"
 
 SESSIONS_503 = "Failed to read typing sessions"
 BASELINE_503 = "Failed to read baseline"
+ANOMALIES_503 = "Failed to read anomaly results"
 INVESTIGATION_503 = "Failed to read investigation data"
 
 MAIN_PATH = Path(__file__).resolve().parents[1] / "main.py"
@@ -61,21 +68,23 @@ def _calls_on(tree, attribute):
 
 
 class RouterShapeTests(unittest.TestCase):
-    def test_three_get_routes_with_the_documented_paths(self):
+    def test_four_get_routes_with_the_documented_paths(self):
         routes = list(api.router.routes)
         self.assertEqual(
             [route.path for route in routes],
-            [SESSIONS_PATH, BASELINE_PATH, INVESTIGATION_PATH],
+            [SESSIONS_PATH, BASELINE_PATH, INVESTIGATION_PATH, ANOMALIES_PATH],
         )
         for route in routes:
             self.assertEqual(route.methods, {"GET"})
 
     def test_each_route_declares_its_response_model(self):
-        sessions, baseline, investigation = list(api.router.routes)
+        sessions, baseline, investigation, anomalies = list(api.router.routes)
         self.assertEqual(get_origin(sessions.response_model), list)
         self.assertIs(get_args(sessions.response_model)[0], SessionReadModel)
         self.assertIs(baseline.response_model, BaselineReadModel)
         self.assertIs(investigation.response_model, InvestigationReadModel)
+        self.assertEqual(get_origin(anomalies.response_model), list)
+        self.assertIs(get_args(anomalies.response_model)[0], AnomalyReadModel)
 
 
 class SessionsEndpointTests(unittest.TestCase):
@@ -422,6 +431,107 @@ class AppWiringTests(unittest.TestCase):
             if isinstance(node, ast.ImportFrom) and node.module == "routes.api"
         ]
         self.assertTrue(api_imports)
+
+
+class AnomaliesEndpointTests(unittest.TestCase):
+    def _rows(self):
+        return [
+            {
+                "user_id": USER,
+                "session_id": "S0001",
+                "anomaly_score": 0.42,
+                "is_anomaly": False,
+            },
+            {
+                "user_id": USER,
+                "session_id": "S0002",
+                "anomaly_score": 0.91,
+                "is_anomaly": True,
+            },
+        ]
+
+    def test_200_contract_shape(self):
+        result = api.list_user_anomalies(USER, client=FakeBaselineClient(self._rows()))
+        self.assertEqual(
+            result,
+            [
+                {"session_id": "S0001", "anomaly_score": 0.42, "is_anomaly": False},
+                {"session_id": "S0002", "anomaly_score": 0.91, "is_anomaly": True},
+            ],
+        )
+
+    def test_empty_store_returns_empty_array(self):
+        self.assertEqual(
+            api.list_user_anomalies(USER, client=FakeBaselineClient([])), []
+        )
+
+    def test_rows_without_a_session_id_are_skipped(self):
+        rows = [{"user_id": USER, "anomaly_score": 0.5, "is_anomaly": True}]
+        self.assertEqual(
+            api.list_user_anomalies(USER, client=FakeBaselineClient(rows)), []
+        )
+
+    def test_null_score_and_flag_are_echoed(self):
+        rows = [
+            {
+                "user_id": USER,
+                "session_id": "S0009",
+                "anomaly_score": None,
+                "is_anomaly": None,
+            }
+        ]
+        self.assertEqual(
+            api.list_user_anomalies(USER, client=FakeBaselineClient(rows)),
+            [{"session_id": "S0009", "anomaly_score": None, "is_anomaly": None}],
+        )
+
+    def test_only_reads_from_the_anomaly_results_table(self):
+        client = FakeBaselineClient([])
+        api.list_user_anomalies(USER, client=client)
+        self.assertEqual(client.tables, ["anomaly_results"])
+        self.assertTrue(set(client.ops) <= {"select", "eq", "execute"})
+
+    def test_503_on_store_read_failure(self):
+        client = FakeBaselineClient([], fail=True)
+        with self.assertRaises(HTTPException) as ctx:
+            api.list_user_anomalies(USER, client=client)
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertEqual(ctx.exception.detail, ANOMALIES_503)
+
+    def test_503_when_the_client_cannot_be_constructed(self):
+        with mock.patch.object(
+            api.reads,
+            "anomaly_client",
+            side_effect=RepositoryError("client down"),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                api.list_user_anomalies(USER, client=None)
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertEqual(ctx.exception.detail, ANOMALIES_503)
+
+    def test_422_on_empty_user_id_before_any_store_access(self):
+        with mock.patch.object(
+            api.reads, "anomaly_client", side_effect=AssertionError("store touched")
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                api.list_user_anomalies("", client=None)
+        self.assertEqual(ctx.exception.status_code, 422)
+
+    def test_dependency_yields_none_when_the_client_is_unavailable(self):
+        with mock.patch.object(
+            api.reads, "anomaly_client", side_effect=RepositoryError("down")
+        ):
+            self.assertIsNone(api.get_anomaly_client())
+
+    def test_dependency_yields_the_client_when_available(self):
+        sentinel = object()
+        with mock.patch.object(api.reads, "anomaly_client", return_value=sentinel):
+            self.assertIs(api.get_anomaly_client(), sentinel)
+
+    def test_response_model_conformance(self):
+        for row in api.list_user_anomalies(USER, client=FakeBaselineClient(self._rows())):
+            model = AnomalyReadModel(**row)
+            self.assertTrue(model.session_id)
 
 
 if __name__ == "__main__":
