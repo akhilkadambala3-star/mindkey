@@ -55,11 +55,11 @@ const MK = (() => {
       head: "Building your personal baseline",
       text: (p) => `MindKey needs more sessions before it can establish a reliable personal baseline${p && p.validSessions != null ? ` — ${p.validSessions} of ${p.minimum || 10} so far` : ""}.` },
     STABLE: { label: "Stable", tone: "stable", level: "Minimal",
-      head: "Your behavioral baseline is stable",
-      text: () => "Your recent interaction patterns remain within your personal baseline." },
+      head: "Your typing pattern matches your baseline",
+      text: () => "Your typing pattern appears consistent with your personal baseline." },
     MONITORING: { label: "Monitoring", tone: "stable", level: "Minimal",
       head: "Stable — with a data-quality note",
-      text: (p) => `Recent patterns match your baseline. ${p && p.invalid ? `${p.invalid} captured session${p.invalid === 1 ? "" : "s"} failed validation and ${p.invalid === 1 ? "was" : "were"} excluded from the analysis.` : "MindKey keeps monitoring."}` },
+      text: (p) => `Recent patterns match your baseline. ${p && p.invalid ? `${p.invalid} session${p.invalid === 1 ? "" : "s"} had incomplete data and ${p.invalid === 1 ? "was" : "were"} set aside.` : "MindKey keeps monitoring."}` },
     CHANGE_DETECTED: { label: "Change detected", tone: "change", level: "Moderate",
       head: "A recent change was detected",
       text: () => "Some signals moved away from your baseline, but the change has not persisted long enough to draw a conclusion. MindKey will keep monitoring." },
@@ -392,8 +392,8 @@ const MK = (() => {
   function SourceChip(p = state.payload) {
     if (!p) return "";
     return p.source === "live"
-      ? `<span class="mk-chip mk-chip-real"><span class="dot"></span>Live data · engine output</span>`
-      : `<span class="mk-chip mk-chip-demo" title="Synthetic sessions. The investigation itself is the real MindKey engine run on them."><span class="dot"></span>Demo data · real engine output</span>`;
+      ? `<span class="mk-chip mk-chip-real"><span class="dot"></span>Live data</span>`
+      : `<span class="mk-chip mk-chip-demo" title="Made-up typing sessions; the anomaly scores and the investigation are real."><span class="dot"></span>Demo data · real AI output</span>`;
   }
 
   function MetricCard(row) {
@@ -476,7 +476,7 @@ const MK = (() => {
       reasons.push({ text: `The pattern persisted across ${depth.value} consecutive recent session${depth.value === 1 ? "" : "s"}${depth.onset ? ` (since ${fmtShort(depth.onset)})` : ""}`, ids: [depth.id] });
     }
     const anomaly = p.evidence.find((e) => e.kind === "anomaly" && e.status === "true");
-    if (anomaly) reasons.push({ text: `The per-user Isolation Forest flagged the triggering session as unusual`, ids: [anomaly.id] });
+    if (anomaly) reasons.push({ text: `The anomaly model, trained on your own history, flagged the latest session as unusual`, ids: [anomaly.id] });
     if (!reasons.length && p.report) {
       (p.report.summary || []).slice(0, 3).forEach((s) => reasons.push({ text: s.replace(/\s*\[[^\]]+\]$/, ""), ids: (s.match(/E\d+/g) || []) }));
     }
@@ -619,7 +619,7 @@ const MK = (() => {
               afterBody: (items) => {
                 const i = items[0].dataIndex;
                 const lines = [];
-                if (flagged[i]) lines.push("ML: flagged by Isolation Forest");
+                if (flagged[i]) lines.push("Flagged by the anomaly model");
                 if (ctxEvents[i]) lines.push(`Check-in: ${ctxEvents[i]}`);
                 const cp = (markers || []).find((m) => m.type === "change" && m.index === i);
                 if (cp) lines.push(`${cp.label}`);
@@ -650,6 +650,128 @@ const MK = (() => {
     rhythm: { label: "Rhythm", get: (s) => s.rhythm_variability, base: (b) => b && num(b.rhythm_variability) ? Math.round(b.rhythm_variability * 100) / 100 : null, unit: "s", title: "Rhythm variability" },
   };
 
+  /* Short chip labels for the dashboard's scenario strip. */
+  const CHIP_LABELS = {
+    stable: "Normal", fatigue: "Temporary fatigue", persistent: "Persistent change",
+    sudden: "Sudden change", recovery: "Recovery", noisy: "Noisy data", insufficient: "Too little data",
+  };
+
+  function ScenarioStrip() {
+    if (state.source === "live") return "";
+    const active = state.scenarioId;
+    return `
+      <section class="mk-explore" aria-labelledby="exploreTitle">
+        <div class="mk-explore-head">
+          <div>
+            <h3 id="exploreTitle">Explore MindKey</h3>
+            <p>Pick a situation. The whole dashboard switches to it — no typing needed.</p>
+          </div>
+          <div class="mk-truth" aria-label="What is real in this demo">
+            <span>Synthetic input</span><span>Real ML pipeline</span><span>Real investigation output</span>
+          </div>
+        </div>
+        <div class="mk-chips" role="group" aria-label="Demo scenarios">
+          ${SCENARIOS.map((sc) => `<button class="mk-chip-btn" data-run-scenario="${sc.id}" aria-pressed="${sc.id === active}" title="${esc(sc.blurb)}">${esc(CHIP_LABELS[sc.id] || sc.title)}</button>`).join("")}
+        </div>
+        <div class="mk-explore-foot">
+          <span class="mk-muted" id="mkExploreStatus" aria-live="polite">${active ? `Showing: <strong>${esc(byId(active).title)}</strong> — ${esc(byId(active).blurb)}` : ""}</span>
+          <span class="mk-explore-links">
+            ${active !== "stable" ? `<button class="mk-linkbtn" data-run-scenario="stable">Reset to normal</button>` : ""}
+            <button class="mk-linkbtn" data-nav="lab">Watch the full pipeline →</button>
+          </span>
+        </div>
+      </section>`;
+  }
+
+  /* The dashboard's centerpiece: what the agent found, and why. */
+  function InvestigationCenterpiece(p, key) {
+    const S = STATES[key];
+    const r = p.report;
+    const fa = p.finalAssessment || {};
+    const per = p.persistence || {};
+    const depth = p.evidence.find((e) => e.kind === "persistence_depth");
+    const ml = p.mlEvidence;
+    const valid = (p.dataQuality || {}).valid_sessions;
+    const moved = num(per.signals_moved) ? per.signals_moved : null;
+    const threshold = Math.round((p.movedThreshold || 0.1) * 100);
+    const titles = {
+      PERSISTENT_CHANGE: "Persistent change detected",
+      CHANGE_DETECTED: "A recent change, not yet persistent",
+      STABLE: "No change from your baseline",
+      MONITORING: "No change from your baseline",
+      BASELINE_FORMING: "Baseline still forming",
+      INSUFFICIENT_EVIDENCE: "Not enough evidence yet",
+      NO_DATA: "Nothing to investigate yet",
+    };
+    // Persistence as a qualitative scale, straight from the engine's result.
+    const persistLevel = key === "PERSISTENT_CHANGE" ? 3 : key === "CHANGE_DETECTED" ? 1 : 0;
+    const persistWord = key === "PERSISTENT_CHANGE" ? "Established"
+      : key === "CHANGE_DETECTED" ? "Not established"
+      : key === "STABLE" || key === "MONITORING" ? "No change to persist"
+      : "Not assessed";
+    const check = (ok, text) => `<li class="${ok ? "ok" : "no"}"><span class="ck" aria-hidden="true">${ok ? "✓" : "–"}</span><span>${text}</span></li>`;
+    const evidence = [
+      check(num(valid) && valid >= (p.minimum || 10), `${num(valid) ? valid : 0} sessions analyzed${num(valid) && valid < (p.minimum || 10) ? ` (needs ${p.minimum || 10})` : ""}`),
+      check(!!moved, moved != null ? `${moved} of 6 signals moved beyond ${threshold}% of your baseline` : "Signals compared with your baseline"),
+      check(depth && depth.status === "sustained", depth && num(depth.value) ? `Change persisted across ${depth.value} consecutive recent session${depth.value === 1 ? "" : "s"}` : "Persistence could not be measured yet"),
+      check(!!(ml && ml.is_anomaly), ml && ml.status === "ok" ? (ml.is_anomaly ? "Anomaly model flagged the latest session" : "Anomaly model: latest session within your normal range") : "Anomaly model not trained yet"),
+      check(true, "Decided across sessions, never from one"),
+    ].join("");
+    const ctx = contextFindings(p).slice(0, -1).slice(0, 2);
+    return `
+      <section class="mk-centerpiece tone-${S.tone}" aria-labelledby="cpTitle">
+        <div class="mk-cp-main">
+          <div class="mk-cp-top">
+            <p class="mk-eyebrow">AI investigation</p>
+            ${StatusBadge(key)}
+          </div>
+          <h2 id="cpTitle">${esc(titles[key] || S.head)}</h2>
+          <p class="mk-cp-lead">${esc(S.text(stateCtx(p)))}</p>
+          <div class="mk-cp-scale">
+            <span class="lbl">Behavioral change</span>
+            <span class="mk-level-scale inline">${["Minimal", "Moderate", "Persistent"].map((l) => `<span class="${S.level === l ? "on" : ""}">${l}</span>`).join("")}</span>
+          </div>
+          <div class="mk-cp-scale">
+            <span class="lbl">Persistence</span>
+            <span class="mk-meter mk-meter-wide lvl-${persistLevel}" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="val">${esc(persistWord)}</span>
+            ${r ? `<span class="lbl mk-sep">Uncertainty</span><span class="val">${esc(r.uncertainty.level[0].toUpperCase() + r.uncertainty.level.slice(1))}</span>` : ""}
+          </div>
+          <div class="mk-cp-cols">
+            <div>
+              <p class="mk-cp-h">Evidence</p>
+              <ul class="mk-checklist">${evidence}</ul>
+            </div>
+            <div>
+              <p class="mk-cp-h">Context</p>
+              ${ctx.length ? `<ul class="mk-checklist ctx">${ctx.map((c) => `<li><span class="ck" aria-hidden="true">i</span><span>${esc(c)}</span></li>`).join("")}</ul>` : `<p class="mk-muted" style="font-size:13px">No check-ins yet.</p>`}
+            </div>
+          </div>
+        </div>
+        <aside class="mk-cp-side">
+          <p class="mk-cp-h">Agent conclusion</p>
+          <blockquote>${esc(p.conclusion.statement)}</blockquote>
+          <p class="mk-muted" style="font-size:12.5px">${r ? `${r.rejected_claims.length} unsupported claims · ${p.evidence.length} evidence items · ${(p.toolsCalled.length || 0) + (p.trace.length ? 1 : 0)} tool calls` : ""}</p>
+          <div class="btn-row">
+            <button class="btn btn-primary btn-sm" data-nav="investigation">View evidence trace</button>
+          </div>
+        </aside>
+      </section>`;
+  }
+
+  function PrivacyCard() {
+    return `
+      <div class="mk-card mk-privacy-card">
+        <div class="mk-privacy-icon" aria-hidden="true"><svg viewBox="0 0 20 20"><rect x="4.5" y="9" width="11" height="8" rx="2"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9"/></svg></div>
+        <div>
+          <h3 class="mk-card-title" style="margin-bottom:4px">Privacy-first</h3>
+          <p style="font-size:14px;color:var(--text)">Your typed words never leave your device.</p>
+          <p class="mk-muted" style="font-size:12.5px;margin-top:4px">Timing features only · Extracted on your device · Minimum data kept</p>
+          <button class="mk-linkbtn" data-nav="privacy" style="margin-top:8px">See exactly what we collect →</button>
+        </div>
+      </div>`;
+  }
+
   function renderDashboard() {
     const root = el("mkDashboard");
     if (!root) return;
@@ -659,11 +781,11 @@ const MK = (() => {
     const hero = `
       <section class="mk-hero" aria-labelledby="heroTitle">
         <div>
-          <p class="mk-eyebrow">Longitudinal behavioral change monitoring</p>
-          <h2 id="heroTitle">Understand changes in your everyday behavior.</h2>
-          <p>MindKey learns your personal behavioral baseline and uses ML + agentic investigation to identify persistent changes — without collecting what you type.</p>
+          <p class="mk-eyebrow">MindKey</p>
+          <h2 id="heroTitle">Notice changes in your typing behavior over time.</h2>
+          <p>MindKey builds a personal baseline from typing timing patterns and looks for persistent changes — without collecting what you type.</p>
           <div class="mk-hero-actions">
-            <button class="btn btn-primary" data-nav="lab">Explore demo</button>
+            <button class="btn btn-primary" data-scroll="exploreTitle">Explore demo</button>
             <button class="btn btn-ghost" data-nav="investigation">View AI investigation</button>
           </div>
         </div>
@@ -679,23 +801,8 @@ const MK = (() => {
         </div>
       </section>`;
 
-    if (state.loading) { root.innerHTML = hero + `<div class="mk-section">${LoadingState()}</div>`; return; }
-    if (!p) { root.innerHTML = hero + `<div class="mk-section">${ErrorState(state.error || "NO_DATA")}</div>`; return; }
-
-    const levels = ["Minimal", "Moderate", "Persistent"];
-    const status = `
-      <section class="mk-state tone-${S.tone}" aria-live="polite">
-        <div>
-          ${StatusBadge(key)}
-          <h2>${esc(S.head)}</h2>
-          <p>${esc(S.text(stateCtx()))}</p>
-        </div>
-        <div class="mk-level">
-          <p class="mk-eyebrow">Behavioral change</p>
-          <div class="mk-level-scale">${levels.map((l) => `<span class="${S.level === l ? "on" : ""}">${l}</span>`).join("")}</div>
-          ${S.level ? "" : `<p class="mk-muted" style="font-size:12px;margin-top:6px">Not enough evidence to grade</p>`}
-        </div>
-      </section>`;
+    if (state.loading) { root.innerHTML = hero + ScenarioStrip() + `<div class="mk-section">${LoadingState()}</div>`; return; }
+    if (!p) { root.innerHTML = hero + ScenarioStrip() + `<div class="mk-section">${ErrorState(state.error || "NO_DATA")}</div>`; return; }
 
     const rows = signalRows(p);
     const pick = ["speed", "corrections", "pauses", "rhythm"];
@@ -718,21 +825,9 @@ const MK = (() => {
         <div class="mk-chart-wrap"><canvas id="mkDashChart" role="img" aria-label="${esc(m.title)} over time compared with the personal baseline"></canvas></div>
         <div class="mk-legend" aria-hidden="true">
           <span><i class="l-line"></i>Your sessions</span><span><i class="l-base"></i>Personal baseline</span>
-          <span><i class="l-change"></i>Change point</span><span><i class="l-context"></i>Check-in</span><span><i class="l-flag"></i>ML-flagged session</span>
+          <span><i class="l-change"></i>Change point</span><span><i class="l-context"></i>Check-in</span><span><i class="l-flag"></i>Flagged by the anomaly model</span>
         </div>
         <p class="sr-only" id="mkDashChartSummary"></p>
-      </div>`;
-
-    const invCard = `
-      <div class="mk-card mk-inv-card tone-${S.tone}">
-        <div class="card-head" style="margin-bottom:8px"><h3 class="mk-card-title" style="margin:0">AI investigation</h3>${StatusBadge(key)}</div>
-        <p class="mk-quote">${esc(p.conclusion.statement)}</p>
-        <div class="mk-inv-stats">
-          <div class="mk-stat"><b>${p.toolsCalled.length + (p.trace.length ? 1 : 0)}</b><span>tool calls</span></div>
-          <div class="mk-stat"><b>${p.evidence.length || (p.report ? p.report.observations.length : 0)}</b><span>evidence items</span></div>
-          <div class="mk-stat"><b>${p.report ? p.report.rejected_claims.length : "—"}</b><span>unsupported claims</span></div>
-        </div>
-        <button class="btn btn-primary btn-sm" data-nav="investigation">View investigation</button>
       </div>`;
 
     const why = whyFlagged(p);
@@ -741,27 +836,43 @@ const MK = (() => {
         <h3 class="mk-card-title">What changed?</h3>
         ${why.reasons.length && key !== "STABLE" && key !== "MONITORING"
           ? `<ol class="mk-list">${why.reasons.map((r, i) => `<li><span class="ix">${i + 1}</span><span class="body">${esc(r.text)} ${r.ids.map((x) => `<span class="mk-evid">${esc(x)}</span>`).join(" ")}</span></li>`).join("")}</ol>`
-          : `<p class="mk-muted" style="font-size:14px">No meaningful change from your baseline. ${p.invalidSessions ? `${p.invalidSessions} session failed validation and was excluded.` : ""}</p>`}
+          : `<p class="mk-muted" style="font-size:14px">No meaningful change from your baseline. ${p.invalidSessions ? `${p.invalidSessions} session had incomplete data and was set aside.` : ""}</p>`}
       </div>`;
 
     const events = contextEvents(p);
-    const agentView = contextFindings(p).slice(0, -1);
     const context = `
       <div class="mk-card">
-        <div class="card-head" style="margin-bottom:8px"><h3 class="mk-card-title" style="margin:0">Context</h3>${p.source === "demo" ? `<span class="mk-chip mk-chip-demo">Scenario check-ins</span>` : ""}</div>
+        <div class="card-head" style="margin-bottom:8px"><h3 class="mk-card-title" style="margin:0">Check-ins</h3>${p.source === "demo" ? `<span class="mk-chip mk-chip-demo">Scenario</span>` : ""}</div>
         ${ContextList(events.slice(-5))}
-        ${agentView.length ? `<p class="card-note" style="margin-top:10px"><strong>Agent:</strong> ${esc(agentView.join(" "))}</p>` : ""}
-        <p class="card-note" style="margin-top:6px">Check-ins from the last 7 days are read by the AI investigation — the day and the factor only. Notes stay private.</p>
+        <p class="card-note" style="margin-top:10px">Check-ins from the last 7 days help the AI separate everyday causes, like poor sleep, from unexplained change. Notes stay private.</p>
         <button class="btn btn-ghost btn-sm" data-nav="checkins" style="margin-top:10px">Add a check-in</button>
       </div>`;
 
-    root.innerHTML = `${hero}${status}${overview}
+    root.innerHTML = `${hero}${ScenarioStrip()}
+      <div class="mk-section" aria-live="polite">${InvestigationCenterpiece(p, key)}</div>
+      ${overview}
       <div class="mk-section mk-grid-main">
         <div class="mk-col">${trend}${changed}</div>
-        <div class="mk-col">${invCard}${context}</div>
+        <div class="mk-col">${context}${PrivacyCard()}</div>
       </div>`;
 
     drawDashChart();
+  }
+
+  /* Run a scenario straight from the dashboard strip. */
+  async function runFromDashboard(id) {
+    const status = el("mkExploreStatus");
+    if (status) status.textContent = `Running ${byId(id).title}…`;
+    document.querySelectorAll("[data-run-scenario]").forEach((b) => (b.disabled = true));
+    const p = await loadScenario(id);
+    if (p) {
+      applyToDashboard();
+      if (typeof onScenarioApplied === "function") onScenarioApplied();
+    }
+    renderDashboard();
+    const strip = el("exploreTitle");
+    if (strip && p) strip.scrollIntoView({ block: "start", behavior: reduced() ? "auto" : "smooth" });
+    if (typeof showToast === "function") showToast(p ? `Now showing: ${byId(id).title}` : "That scenario couldn't load. Try again.");
   }
 
   function drawDashChart() {
@@ -771,7 +882,7 @@ const MK = (() => {
     const m = DASH_METRICS[state.dashMetric];
     if (!canvas) return;
     if (typeof Chart === "undefined" || sessions.length < 2) {
-      canvas.parentElement.innerHTML = `<p class="chart-fallback">${sessions.length < 2 ? "Not enough sessions yet to draw a trend." : "Charts need internet access to load Chart.js."}</p>`;
+      canvas.parentElement.innerHTML = `<p class="chart-fallback">${sessions.length < 2 ? "Not enough sessions yet to draw a trend." : "The chart couldn't be drawn right now."}</p>`;
       return;
     }
     const base = m.base(typeof App !== "undefined" ? App.baseline : null);
@@ -828,13 +939,14 @@ const MK = (() => {
           <span>Trigger session <b>${esc(p.finalAssessment.trigger_session_id || (r && r.session_id) || "—")}</b></span>
           <span>Iterations <b>${esc(p.iterations ?? "—")}</b></span>
           <span>Tools called <b>${esc((p.toolsCalled.length || 0) + (p.trace.length ? 1 : 0))}</b></span>
-          <span>Trace events <b>${esc(p.traceCount || steps.length)}</b></span>
+          <span>Steps recorded <b>${esc(p.traceCount || steps.length)}</b></span>
           <span>Stop reason <b>${esc(STOP_NAMES[p.stopReason] || human(p.stopReason) || "—")}</b></span>
-          ${r && r.link ? `<span>Evidence digest <b class="mk-mono">${esc(r.link.evidence_digest.slice(0, 12))}…</b></span>` : ""}
+          ${r && r.link ? `<span class="mk-tech">Evidence digest <b class="mk-mono">${esc(r.link.evidence_digest.slice(0, 12))}…</b></span>` : ""}
         </div>
         <div class="btn-row" style="margin-top:14px">
           <button class="btn btn-ghost btn-sm" id="mkReplayBtn">${replay ? "Replaying…" : "Replay investigation"}</button>
           <button class="btn btn-ghost btn-sm" data-nav="lab">Try another scenario</button>
+          <button class="btn btn-ghost btn-sm" id="mkTechBtn" aria-pressed="${state.showTech ? "true" : "false"}">${state.showTech ? "Hide" : "Show"} technical trace</button>
         </div>
       </section>`;
 
@@ -854,7 +966,7 @@ const MK = (() => {
               </div>
             </li>`).join("")}
         </ol>
-        <p class="mk-tl-foot">${p.trace.length ? "Every step is an event from the engine's recorded trace (deterministic clock). Replay paces the events for readability; order and content are unchanged." : "Rendered from the backend's investigation timeline."}</p>
+        <p class="mk-tl-foot">${p.trace.length ? "Every step was recorded by the agent as it ran. Replay shows them in order at a readable pace." : "The steps the agent recorded for this investigation."}</p>
       </section>`;
 
     const hyps = r ? `
@@ -968,6 +1080,13 @@ const MK = (() => {
       <div class="mk-section mk-stack">${explorer}${alts}${decision}</div>`;
 
     el("mkReplayBtn").addEventListener("click", () => replayInvestigation());
+    root.classList.toggle("show-tech", !!state.showTech);
+    el("mkTechBtn").addEventListener("click", (e) => {
+      state.showTech = !state.showTech;
+      root.classList.toggle("show-tech", state.showTech);
+      e.currentTarget.setAttribute("aria-pressed", String(state.showTech));
+      e.currentTarget.textContent = `${state.showTech ? "Hide" : "Show"} technical trace`;
+    });
     if (replay) runReplay(steps.length, finalKey);
   }
 
@@ -1018,17 +1137,16 @@ const MK = (() => {
     const root = el("mkLab");
     if (!root) return;
     labSelected = labSelected || state.scenarioId || "persistent";
-    const live = typeof API_BASE === "string" && API_BASE;
     root.innerHTML = `
       <div class="mk-banner" role="note">
-        <span aria-hidden="true">ⓘ</span>
-        <span><b>Demo data, real engine.</b> Each scenario is a set of synthetic typing sessions and check-ins. Every session is scored by the real per-user Isolation Forest, the same way the backend scores new sessions, and the investigation is the real MindKey agent (${live ? "fetched live from <code>/api/demo</code>" : "precomputed by <code>backend/scripts/export_demo.py</code>; a test keeps it identical to the engine"}). Nothing here is typed text, and no result is hand-written.</span>
+        <div class="mk-truth" aria-label="What is real in this demo"><span>Synthetic input</span><span>Real ML pipeline</span><span>Real investigation output</span></div>
+        <span>Each scenario is a made-up set of typing sessions and check-ins. The anomaly model scores every session and the AI agent investigates, exactly as they would with your real data. Nothing here is typed text, and no result is hand-written.</span>
       </div>
       <section class="mk-section" aria-labelledby="scenTitle">
         <div class="mk-section-head"><h3 id="scenTitle">1 · Choose a scenario</h3></div>
         <div class="mk-scen-grid" role="group" aria-label="Demo scenarios">
           ${SCENARIOS.map((s) => `<button class="mk-scen" data-scen="${s.id}" aria-pressed="${s.id === labSelected}">
-            <b>${esc(s.title)}</b><p>${esc(s.blurb)}</p><span class="engine">engine: ${esc(s.key)}</span></button>`).join("")}
+            <b>${esc(s.title)}</b><p>${esc(s.blurb)}</p></button>`).join("")}
         </div>
         <div class="mk-lab-run">
           <button class="btn btn-primary" id="mkRunBtn">Run scenario</button>
@@ -1064,7 +1182,7 @@ const MK = (() => {
         ${p && upTo > 0 ? `<p class="big">${p.sessions.length} sessions</p><p>${esc(dq.valid_sessions)} valid · ${esc(first)} – ${esc(last)}</p><p>Timing features only — no typed content.</p>` : `<p>Behavioral sessions from the desktop agent.</p>`}</div>
       <div class="mk-stage ${cls(1)}"><h4>ML <span>2</span></h4>
         ${p && upTo > 1 ? `<p class="big">${ml && ml.status === "ok" ? (ml.is_anomaly ? "Flagged" : "Not flagged") : "No model result"}</p>
-          <p>${ml && ml.status === "ok" ? `Isolation Forest on the trigger session` : `No stored anomaly result${(dq.valid_sessions ?? 0) < (p.minimum || 10) ? ` — needs ${p.minimum} valid sessions` : ""}`}</p>
+          <p>${ml && ml.status === "ok" ? `Per-user anomaly model (Isolation Forest) on the latest session` : `Not scored yet${(dq.valid_sessions ?? 0) < (p.minimum || 10) ? ` — the model needs ${p.minimum} sessions` : ""}`}</p>
           <p>${num(per.signals_moved) ? `${per.signals_moved} of 6 signals moved vs. baseline` : ""}</p>` : `<p>Personal baseline, statistical drift and Isolation Forest.</p>`}</div>
       <div class="mk-stage ${cls(2)}"><h4>Agent <span>3</span></h4>
         ${p && upTo > 2 ? `<p class="big">${(p.toolsCalled.length || 0) + 1} tool calls</p><p>${esc(p.iterations)} iteration${p.iterations === 1 ? "" : "s"} · ${esc(p.traceCount)} trace events</p>` : `<p>Plans evidence, calls tools, stops when sufficient.</p>`}
@@ -1201,7 +1319,7 @@ const MK = (() => {
     loadScenario, loadLive, savedScenario, applyToDashboard, dataState,
     renderDashboard, drawDashChart, renderInvestigation, renderLab, renderWellbeingContext,
     replayInvestigation, runScenario, markersFor, markerPlugin, initTheme, toggleTheme, scenarioChip,
-    legacyTypingState, insightModel,
+    legacyTypingState, insightModel, runFromDashboard,
     setDashMetric(k) { if (DASH_METRICS[k]) { state.dashMetric = k; renderDashboard(); } },
   };
 })();

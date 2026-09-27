@@ -11,7 +11,7 @@
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="mk.css">
 <script>try{var t=localStorage.getItem("mindkey.theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t}catch(e){}</script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -110,36 +110,6 @@
       <section class="view" data-view="home">
         <div id="mkDashboard"></div>
 
-        <div class="home-grid mk-section">
-          <section class="card agent-card" aria-labelledby="agentTitle">
-            <div class="card-head">
-              <h3 id="agentTitle">Monitoring</h3>
-              <span class="agent-head-right">
-                <span class="pill pill-demo" title="Demo mode rehearses the desktop agent's lifecycle; no real keystrokes are captured here.">Simulated</span>
-                <span class="agent-state" id="agentStateText">Waiting for typing</span>
-              </span>
-            </div>
-            <p class="agent-line" id="agentLine">MindKey listens for your next typing activity.</p>
-            <div class="agent-progress" id="agentProgress" hidden>
-              <div class="agent-progress-fill" id="agentProgressFill"></div>
-            </div>
-            <div class="agent-meta">
-              <span id="agentMeta">Sessions today: <strong id="agentSessionsToday">–</strong> / <span id="agentSessionsLimit">100</span></span>
-              <button class="btn btn-ghost btn-sm" id="agentPauseBtn">Pause monitoring</button>
-            </div>
-            <p class="agent-note" id="agentNote">Simulated desktop agent lifecycle — waiting → analyzing → uploading → daily limit. No keystrokes are captured in demo mode.</p>
-          </section>
-
-          <section class="card" aria-labelledby="dsTitle">
-            <h3 id="dsTitle" class="card-title">Where this data comes from</h3>
-            <ul class="how-list">
-              <li><span class="how-num">1</span><span><strong>Sessions</strong> — timing features from the desktop agent (demo: synthetic sessions).</span></li>
-              <li><span class="how-num">2</span><span><strong>ML</strong> — a personal baseline plus a per-user Isolation Forest anomaly model.</span></li>
-              <li><span class="how-num">3</span><span><strong>Agent</strong> — a deterministic investigation engine with a critic that rejects any claim not linked to evidence.</span></li>
-            </ul>
-          </section>
-        </div>
-
         <p class="smallprint">MindKey looks for persistent changes in your own typing behavior over time. It is not a medical device and does not diagnose any condition.</p>
       </section>
 
@@ -181,7 +151,7 @@
           </div>
           <div class="chart-wrap">
             <canvas id="trendChart" role="img" aria-label="Typing trend chart"></canvas>
-            <p class="chart-fallback" id="chartFallback" hidden>Charts need internet access to load Chart.js. Everything else works offline.</p>
+            <p class="chart-fallback" id="chartFallback" hidden>The chart couldn't be drawn. The same numbers are in "What changed?" below.</p>
           </div>
           <p class="sr-only" id="chartSummary" aria-live="polite"></p>
           <div class="mk-legend" aria-hidden="true"><span><i class="l-line"></i>Your sessions</span><span><i class="l-base"></i>Personal baseline</span><span><i class="l-change"></i>Change point (from the investigation)</span><span><i class="l-context"></i>Check-in</span></div>
@@ -229,7 +199,7 @@
             </table>
           </div>
           <p class="empty-state" id="sessionsEmpty" hidden>No sessions in this period yet.</p>
-          <p class="table-legend">Single sessions are never classified on their own — conclusions come from the investigation across many sessions. <span class="pill pill-neutral">Recorded</span> <span class="pill pill-flag">ML flag</span> Isolation Forest marked it unusual · <span class="pill pill-invalid">Invalid</span> failed validation, excluded</p>
+          <p class="table-legend">Single sessions are never classified on their own — conclusions come from the investigation across many sessions. <span class="pill pill-neutral">Recorded</span> <span class="pill pill-flag">ML flag</span> the anomaly model found it unusual for you · <span class="pill pill-invalid">Invalid</span> incomplete data, not used</p>
         </div>
         <p class="smallprint">Sessions are collected automatically while you type normally — no typing-test website needed. Each session captures timing patterns only, never what you typed.</p>
       </section>
@@ -276,16 +246,16 @@
 
         <div class="symptom-footer">
           <button class="btn btn-ghost" id="symptomBack">Back</button>
-          <button class="btn btn-primary" id="symptomSubmit">Continue to health insight</button>
+          <button class="btn btn-primary" id="symptomSubmit">Continue to your insight</button>
         </div>
       </section>
 
-      <!-- ================= HEALTH INSIGHTS ================= -->
+      <!-- ================= BEHAVIORAL INSIGHT ================= -->
       <section class="view" data-view="insights">
         <div class="insight-head">
-          <p class="eyebrow">Health insight</p>
-          <h3 class="card-title">Your recent behavioral picture</h3>
-          <p class="card-body">MindKey combines three kinds of information before suggesting anything: your typing pattern, the context you've shared, and any symptoms you've reported.</p>
+          <p class="eyebrow">Behavioral insight</p>
+          <h3 class="card-title">Your typing pattern, in context</h3>
+          <p class="card-body">MindKey looks at your typing pattern first, then at what you've told it through check-ins. It describes what it observes in your typing, never what might cause it.</p>
         </div>
 
         <div class="signal-grid" id="signalGrid">
@@ -327,23 +297,7 @@
         <p class="smallprint">If a change concerns you, talking to your usual doctor is the most direct next step — you can bring this investigation with you. This insight is not a medical diagnosis. It is an observation about your typing behavior over time, intended to support — never replace — a conversation with a qualified healthcare professional.</p>
       </section>
 
-      <!-- ================= MEDICAL ASSISTANCE ================= -->
-      <section class="view" data-view="care">
-        <div class="care-head">
-          <div class="care-steps" id="careSteps">
-            <span class="care-step active">Specialty</span>
-            <span class="care-step">Provider</span>
-            <span class="care-step">Time</span>
-            <span class="care-step">Confirm</span>
-          </div>
-          <p class="care-note">Prototype flow — the providers and availability shown here are examples, not real appointments.</p>
-        </div>
-
-        <div id="careContent"></div>
-
-        <p class="smallprint">If you're concerned about changes in your health, the most direct next step is to contact your usual doctor. MindKey is here to help you start that conversation with more context — it does not replace medical advice.</p>
-      </section>
-
+      
       <!-- ================= PRIVACY ================= -->
       <section class="view" data-view="privacy">
         <div class="privacy-cols">
@@ -425,7 +379,7 @@
               <button class="btn btn-danger btn-sm" id="deleteDataBtn">Delete</button>
             </li>
           </ul>
-          <p class="card-note">"Active" controls work in the current prototype. "Demo only" changes local demo data and notes what the backend must support for production. "Planned" features are designed but not yet implemented.</p>
+          <p class="card-note">"Active" controls work now. "Demo only" works on the demo data in this browser. "Planned" controls are designed but not built yet.</p>
         </section>
 
         <p class="smallprint">MindKey is designed around data minimization: it stores only the minimum behavioral features the model needs, never your typed content. You can delete everything at any time.</p>
@@ -448,8 +402,7 @@
 
           <div class="card" id="demoCard">
             <h3 class="card-title">Demo data</h3>
-            <p class="card-body">MindKey is currently running on <strong>demo data</strong>, so the whole product can be explored without a connected backend. The sessions and check-ins are synthetic, not real typing. The ML scores and the investigation are real: the backend's Isolation Forest and agent were run on this data.</p>
-            <p class="card-body">The Monitoring card also <strong>simulates the desktop agent</strong>: a simulated session lasts 20 seconds and stops at the same daily limit as the real agent in <code>agent/listener.py</code>.</p>
+            <p class="card-body">You're exploring MindKey with <strong>demo data</strong>. The typing sessions and check-ins are made up. The anomaly scores and the AI investigation are real: the same model and agent that run on live data produced them.</p>
             <label class="field">
               <span>Scenario</span>
               <select id="settingsScenarioSelect"></select>
@@ -465,37 +418,64 @@
             <ul class="data-source-list">
               <li>
                 <span class="dot dot-ok" id="dataSourceDemoDot"></span>
-                <span><strong>Simulated demo data</strong> <span class="opt" id="dataSourceDemoOpt">(active)</span><br>
-                Synthetic sessions and check-ins for seven scenarios, with real ML scores and real agent output computed from them (see the Demo Lab). The Monitoring card's agent status is simulated.</span>
+                <span><strong>Demo data</strong> <span class="opt" id="dataSourceDemoOpt">(active)</span><br>
+                Seven example situations, from a normal week to a persistent change.</span>
               </li>
               <li>
                 <span class="dot dot-muted" id="dataSourceApiDot"></span>
-                <span><strong>MindKey backend API</strong> <span class="opt" id="dataSourceApiOpt">(not connected)</span><br>
-                The backend serves <strong>sessions</strong>, <strong>baseline</strong>, <strong>check-ins</strong> and the full <strong>investigation</strong> (trace, evidence, hypotheses). The dashboard starts in demo mode; to read live data, run the backend and open the dashboard with <code>?api=http://localhost:8000&amp;user=&lt;your-user-id&gt;</code>. No Supabase? Run the backend with <code>MINDKEY_STORE=local</code>. Agent status, symptoms and delete remain <strong>planned</strong>.</span>
+                <span><strong>Live data</strong> <span class="opt" id="dataSourceApiOpt">(not connected)</span><br>
+                Your own sessions and check-ins from the MindKey desktop agent.</span>
               </li>
             </ul>
-            <form class="mk-connect" id="connectForm" novalidate>
-              <p class="mk-eyebrow">Connect a live backend</p>
-              <label class="field">
-                <span>API URL</span>
-                <input type="url" id="connectApi" placeholder="https://mindkey-api.onrender.com" autocomplete="off" spellcheck="false">
-              </label>
-              <label class="field">
-                <span>User ID</span>
-                <input type="text" id="connectUser" placeholder="the user's UUID" autocomplete="off" spellcheck="false">
-              </label>
-              <p class="mk-muted" id="connectStatus" role="status" aria-live="polite" style="font-size:13px"></p>
-              <div class="btn-row">
-                <button class="btn btn-primary btn-sm" type="submit" id="connectBtn">Connect</button>
-                <button class="btn btn-ghost btn-sm" type="button" id="disconnectBtn">Back to demo data</button>
+            <details class="mk-dev" id="devDetails">
+              <summary>Developer / system info</summary>
+              <div class="mk-dev-body">
+                <p><strong>How demo data is made.</strong> Synthetic sessions are scored in order by the per-user Isolation Forest (trained on each user's earlier sessions, at least 10), then investigated by the agent. <code>backend/scripts/export_demo.py</code> writes the results to <code>dashboard/demo/</code>; a test keeps them identical to the engine.</p>
+                <p><strong>Live mode.</strong> Run the API (<code>uvicorn main:app</code> in <code>backend/</code>) and open this page with <code>?api=http://localhost:8000&amp;user=&lt;user id&gt;</code>, or use the form below. Without Supabase, set <code>MINDKEY_STORE=local</code>. The desktop agent is <code>agent/listener.py</code> and sends 20-second sessions (limit 100 a day).</p>
+                <p><strong>Planned.</strong> Agent status, symptoms sync and account deletion are not wired to the API yet.</p>
+                <form class="mk-connect" id="connectForm" novalidate>
+                  <p class="mk-eyebrow">Connect a live backend</p>
+                  <label class="field">
+                    <span>API URL</span>
+                    <input type="url" id="connectApi" placeholder="https://mindkey-api.onrender.com" autocomplete="off" spellcheck="false">
+                  </label>
+                  <label class="field">
+                    <span>User ID</span>
+                    <input type="text" id="connectUser" placeholder="the user's UUID" autocomplete="off" spellcheck="false">
+                  </label>
+                  <p class="mk-muted" id="connectStatus" role="status" aria-live="polite" style="font-size:13px"></p>
+                  <div class="btn-row">
+                    <button class="btn btn-primary btn-sm" type="submit" id="connectBtn">Connect</button>
+                    <button class="btn btn-ghost btn-sm" type="button" id="disconnectBtn">Back to demo data</button>
+                  </div>
+                </form>
               </div>
-            </form>
+            </details>
           </div>
+
+          <section class="card agent-card" aria-labelledby="agentTitle">
+            <div class="card-head">
+              <h3 id="agentTitle">Desktop agent</h3>
+              <span class="agent-head-right">
+                <span class="pill pill-demo" title="Demo mode rehearses the desktop agent's lifecycle; no real keystrokes are captured here.">Simulated</span>
+                <span class="agent-state" id="agentStateText">Waiting for typing</span>
+              </span>
+            </div>
+            <p class="agent-line" id="agentLine">MindKey listens for your next typing activity.</p>
+            <div class="agent-progress" id="agentProgress" hidden>
+              <div class="agent-progress-fill" id="agentProgressFill"></div>
+            </div>
+            <div class="agent-meta">
+              <span id="agentMeta">Sessions today: <strong id="agentSessionsToday">–</strong> / <span id="agentSessionsLimit">100</span></span>
+              <button class="btn btn-ghost btn-sm" id="agentPauseBtn">Pause monitoring</button>
+            </div>
+            <p class="agent-note" id="agentNote">Simulated desktop agent lifecycle — waiting → analyzing → uploading → daily limit. No keystrokes are captured in demo mode.</p>
+          </section>
 
           <div class="card">
             <h3 class="card-title">About</h3>
             <p class="card-body">MindKey is an AI-powered early-warning prototype that studies everyday typing patterns to notice persistent behavioral change. It is a research prototype, not a medical device, and it never diagnoses disease.</p>
-            <p class="control-desc">Version 0.4 · AI Investigation, Demo Lab, Privacy Center, dark mode</p>
+            <p class="control-desc">Version 0.5 · Investigation-first dashboard, scenario explorer, bundled charts</p>
           </div>
         </div>
       </section>
@@ -512,7 +492,7 @@
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5.5 5.5 9 9M14.5 5.5l-9 9"/></svg>
     </button>
   </div>
-  <p class="control-desc">Everything MindKey stores for you — shown here as it would be sent to or read from the backend.</p>
+  <p class="control-desc">Everything MindKey stores for you, exactly as it is stored: timing numbers and check-ins, never text.</p>
   <pre class="data-dump" id="dataDump"></pre>
 </dialog>
 

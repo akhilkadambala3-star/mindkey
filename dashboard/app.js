@@ -24,8 +24,7 @@ const VIEW_META = {
   sessions: ["Sessions", "A record of your analyzed typing sessions"],
   checkins: ["Wellbeing", "Context that helps explain variation"],
   symptoms: ["Symptom check", "A few additional questions"],
-  insights: ["Insights", "What multiple signals are telling us"],
-  care: ["Medical Assistance", "Moving from insight to professional help"],
+  insights: ["Insights", "What your typing pattern shows, in plain words"],
   privacy: ["Privacy Center", "What we collect — and what we never see"],
   settings: ["Profile & settings", "Profile, data, and preferences"],
 };
@@ -87,7 +86,6 @@ const App = {
     sessionCountToday: 4,
     timers: [],
   },
-  care: { step: 1, specialty: null, provider: null, slot: null },
   checkin: { selected: null },
   symptoms: {},
 };
@@ -191,7 +189,7 @@ const STATUS_META = {
   ml_flag: {
     label: "ML flag",
     pill: "pill-flag",
-    help: "The per-user Isolation Forest model flagged this session as unusual. A flag is not a diagnosis.",
+    help: "The anomaly model, trained only on your own earlier sessions, found this session unusual for you. A flag is not a diagnosis.",
   },
   invalid: {
     label: "Invalid",
@@ -313,7 +311,6 @@ const VIEW_RENDERERS = () => ({
   checkins: renderCheckins,
   symptoms: renderSymptoms,
   insights: renderInsights,
-  care: renderCare,
   privacy: renderPrivacy,
   settings: renderSettings,
 });
@@ -656,7 +653,7 @@ function renderTrends() {
   if (!App.chartOk) {
     destroyChart();
     fallback.textContent =
-      "Charts need internet access to load Chart.js. Everything else works offline.";
+      "The chart couldn't be drawn. The same numbers are in \"What changed?\" below.";
     fallback.hidden = false;
     setChartSummary([], metric, null);
     return;
@@ -811,7 +808,7 @@ function renderSessions() {
     const ml = s.anomaly || (s.is_anomaly != null ? { is_anomaly: s.is_anomaly, anomaly_score: s.anomaly_score } : null);
     const anomalyBadge =
       ml && ml.is_anomaly === true
-        ? ` <span class="pill pill-flag" title="The per-user Isolation Forest flagged this session${
+        ? ` <span class="pill pill-flag" title="The anomaly model found this session unusual for you${
             isNumber(ml.anomaly_score) ? ` (score ${Number(ml.anomaly_score).toFixed(2)})` : ""
           }. A score is not a diagnosis.">ML flag</span>`
         : "";
@@ -907,7 +904,7 @@ async function submitCheckinFlow() {
       note,
     });
   } catch (err) {
-    showToast("Your check-in wasn't saved — the backend didn't respond. Try again in a moment.");
+    showToast("Your check-in wasn't saved — MindKey couldn't reach the server. Try again in a moment.");
     return;
   }
   // Live mode: the investigation reads check-ins, so re-run it now.
@@ -1067,8 +1064,8 @@ function renderInsights() {
     level = "ok"; pillClass = "pill-ok"; headline = "Too early to say";
     body = m.state.text({ validSessions: null });
   } else if (!persistent && !changed) {
-    level = "ok"; pillClass = "pill-ok"; headline = "Your pattern looks consistent";
-    body = "Your recent typing stays close to your personal baseline. Keep typing normally; MindKey keeps learning in the background.";
+    level = "ok"; pillClass = "pill-ok"; headline = "Your typing pattern appears consistent with your personal baseline";
+    body = "Recent sessions stay close to the baseline MindKey learned from your own typing. Keep typing normally; MindKey keeps learning in the background.";
   } else if (changed && m.contextExplains) {
     level = "warn"; pillClass = "pill-warn"; headline = "A recent change with an everyday explanation";
     body = `The change hasn't persisted, and the agent treats ${ctxNames} as a plausible explanation. MindKey will keep watching to confirm things settle.`;
@@ -1147,9 +1144,9 @@ function openSessionDialog(s) {
 
   const ml = s.anomaly;
   const mlLine = invalid
-    ? "Not scored: this session failed validation."
+    ? "Not scored: this session's data was incomplete."
     : ml
-      ? `Isolation Forest anomaly score ${Number(ml.anomaly_score).toFixed(2)} (higher means more unusual for you). ${ml.is_anomaly ? "Flagged as unusual for you." : "Within your normal range."}`
+      ? `Anomaly score ${Number(ml.anomaly_score).toFixed(2)} from the model trained on your earlier sessions (higher means more unusual for you). ${ml.is_anomaly ? "Flagged as unusual for you." : "Within your normal range."}`
       : "Not scored: the model trains once there are at least 10 earlier valid sessions.";
 
   const day = String(s.session_start || s.date || "").slice(0, 10);
@@ -1164,7 +1161,7 @@ function openSessionDialog(s) {
       <div class="mk-stat"><b>${invalid ? "Invalid" : "Valid"}</b><span>data quality</span></div>
       <div class="mk-stat"><b>${invalid ? "—" : `${movedCount} of 6`}</b><span>signals beyond ${Math.round(threshold * 100)}%</span></div>
     </div>
-    ${invalid ? `<p class="mk-session-note">This session failed feature validation (for example, a zero typing speed), so it is excluded from the baseline, the charts and the investigation.</p>` : ""}
+    ${invalid ? `<p class="mk-session-note">This session's data was incomplete (for example, no typing speed was recorded), so it is left out of your baseline, the charts and the investigation.</p>` : ""}
     <div class="mk-session-table-wrap">
       <table class="mk-session-table">
         <caption class="sr-only">Signals for this session compared with the personal baseline</caption>
@@ -1185,190 +1182,6 @@ function openSessionDialog(s) {
 function escapeHtml(v) {
   return String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
-
-/* --------------------------------------------------------------------------
-   Medical assistance
-   -------------------------------------------------------------------------- */
-
-const CARE_SPECIALTIES = [
-  { id: "neurology", name: "Neurology", desc: "Doctors who specialise in the brain and nervous system." },
-  { id: "general", name: "General Medicine", desc: "A family doctor or general practitioner who knows your overall health." },
-  { id: "psychiatry", name: "Psychiatry", desc: "Medical doctors focused on mental and emotional health." },
-  { id: "psychology", name: "Psychology", desc: "Professionals supporting emotional, cognitive, and behavioural wellbeing." },
-];
-
-const PROVIDER_POOL = {
-  neurology: ["Dr. A. Reyes", "Dr. M. Okafor", "Dr. L. Tran"],
-  general: ["Dr. S. Novak", "Dr. P. Andersson", "Dr. K. Patel"],
-  psychiatry: ["Dr. J. Meyer", "Dr. R. Haddad", "Dr. C. Lindqvist"],
-  psychology: ["Dr. N. Bergström", "Dr. T. Yoshida", "Dr. E. Marchetti"],
-};
-
-function mockProviders(specialtyId) {
-  return (PROVIDER_POOL[specialtyId] || []).map((name, i) => ({
-    id: `${specialtyId}-${i}`,
-    name,
-    specialty: CARE_SPECIALTIES.find((s) => s.id === specialtyId).name,
-    note: `Example provider · ${i === 0 ? "usually available within days" : "usually available within 1–2 weeks"}`,
-  }));
-}
-
-function mockSlots() {
-  const slots = [];
-  const now = new Date();
-  const times = ["09:00", "11:30", "14:00", "16:30"];
-  for (let d = 1; d <= 5; d++) {
-    const day = new Date(now);
-    day.setDate(day.getDate() + d);
-    const weekday = day.toLocaleDateString("en-US", { weekday: "short" });
-    const dateLabel = day.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    for (const t of times) {
-      // Every ~5th slot is unavailable, so the demo shows a realistic mix.
-      const taken = (d * times.length + times.indexOf(t)) % 5 === 0;
-      slots.push({ day: dateLabel, weekday, time: t, taken });
-    }
-  }
-  return slots;
-}
-
-function renderCare() {
-  const steps = $("careSteps");
-  steps.querySelectorAll(".care-step").forEach((el, i) => {
-    el.className = "care-step" + (i + 1 < App.care.step ? " done" : "") + (i + 1 === App.care.step ? " active" : "");
-  });
-
-  const content = $("careContent");
-  const c = App.care;
-
-  if (c.step === 1) {
-    content.innerHTML = `
-      <h3>Which kind of professional would you like to see?</h3>
-      <div class="specialty-grid">
-        ${CARE_SPECIALTIES.map(
-          (s) => `
-            <button class="specialty-card ${c.specialty === s.id ? "selected" : ""}" data-specialty="${s.id}">
-              <h4>${s.name}</h4>
-              <p>${s.desc}</p>
-              <span class="specialty-tag">${s.id === "neurology" ? "Relevant to typing changes" : "General option"}</span>
-            </button>`
-        ).join("")}
-      </div>
-      <p class="card-note">MindKey never chooses for you — this is about making it easy to start a conversation. Your usual doctor is always a good first step.</p>`;
-
-    content.querySelectorAll(".specialty-card").forEach((card) => {
-      card.addEventListener("click", () => {
-        App.care.specialty = card.dataset.specialty;
-        App.care.provider = null;
-        App.care.slot = null;
-        App.care.step = 2;
-        renderCare();
-      });
-    });
-  } else if (c.step === 2) {
-    const providers = mockProviders(c.specialty);
-    content.innerHTML = `
-      <h3>Choose a provider <span class="opt">— ${CARE_SPECIALTIES.find((s) => s.id === c.specialty).name}</span></h3>
-      ${providers
-        .map(
-          (p) => `
-            <div class="provider-row">
-              <div>
-                <p class="provider-name">${p.name}<span class="provider-tag">Example</span></p>
-                <p class="provider-meta">${p.note}</p>
-              </div>
-              <button class="btn btn-ghost btn-sm" data-provider="${p.id}">${c.provider === p.id ? "Selected" : "Choose"}</button>
-            </div>`
-        )
-        .join("")}
-      <div class="care-actions">
-        <button class="btn btn-ghost" id="careBackBtn">Back</button>
-      </div>`;
-
-    content.querySelectorAll("[data-provider]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        App.care.provider = btn.dataset.provider;
-        App.care.slot = null;
-        App.care.step = 3;
-        renderCare();
-      });
-    });
-    $("careBackBtn").addEventListener("click", () => {
-      App.care.step = 1;
-      renderCare();
-    });
-  } else if (c.step === 3) {
-    const slots = mockSlots();
-    const provider = mockProviders(c.specialty).find((p) => p.id === c.provider);
-    content.innerHTML = `
-      <h3>Pick a time <span class="opt">— ${provider.name}</span></h3>
-      <div class="slot-grid">
-        ${slots
-          .map(
-            (s, i) => `
-              <button class="slot-btn ${c.slot === i ? "selected" : ""}" data-slot="${i}" ${s.taken ? "disabled" : ""}>
-                <span class="slot-date">${s.weekday} ${s.day}</span>${s.time}
-              </button>`
-          )
-          .join("")}
-      </div>
-      <p class="card-note">All times shown are simulated for the prototype.</p>
-      <div class="care-actions">
-        <button class="btn btn-ghost" id="careBackBtn">Back</button>
-      </div>`;
-
-    content.querySelectorAll("[data-slot]").forEach((btn) => {
-      if (btn.disabled) return;
-      btn.addEventListener("click", () => {
-        App.care.slot = Number(btn.dataset.slot);
-        App.care.step = 4;
-        renderCare();
-      });
-    });
-    $("careBackBtn").addEventListener("click", () => {
-      App.care.step = 2;
-      renderCare();
-    });
-  } else {
-    const provider = mockProviders(c.specialty).find((p) => p.id === c.provider);
-    const slot = mockSlots()[c.slot];
-    const booked = store.get(KEYS.appointment, null);
-    content.innerHTML = `
-      <h3>Confirm your appointment</h3>
-      <div class="card care-summary">
-        <div class="care-summary-row"><strong>Provider</strong><span>${provider.name} — ${provider.specialty}</span></div>
-        <div class="care-summary-row"><strong>When</strong><span>${slot.weekday}, ${slot.day} at ${slot.time}</span></div>
-        <div class="care-summary-row"><strong>How</strong><span>In-person or video call — confirmed by the clinic</span></div>
-      </div>
-      ${
-        booked
-          ? `<div class="care-confirm-note">Appointment saved locally for this demo (${booked.date}). A real booking system would send this to the clinic and confirm by email.</div>`
-          : `<div class="care-actions">
-              <button class="btn btn-primary" id="careConfirmBtn">Confirm appointment</button>
-              <button class="btn btn-ghost" id="careBackBtn">Back</button>
-            </div>`
-      }`;
-
-    $("careBackBtn")?.addEventListener("click", () => {
-      App.care.step = 3;
-      renderCare();
-    });
-    $("careConfirmBtn")?.addEventListener("click", () => {
-      store.set(KEYS.appointment, {
-        user_id: USER_ID,
-        specialty: provider.specialty,
-        provider: provider.name,
-        slot: `${slot.weekday}, ${slot.day} at ${slot.time}`,
-        date: new Date().toISOString(),
-      });
-      renderCare();
-      showToast("Appointment noted (demo). A real integration would confirm with the clinic.");
-    });
-  }
-}
-
-/* --------------------------------------------------------------------------
-   Privacy
-   -------------------------------------------------------------------------- */
 
 function renderPrivacy() {
   // Pause button state is kept in sync by renderAgent().
@@ -1398,7 +1211,7 @@ async function deleteDataFlow() {
   App.symptoms = {};
   agentResetDay();
   renderCheckinHistory();
-  showToast("Demo data cleared. (Production: wire this to DELETE /api/users/{id}/data.)");
+  showToast("Your check-ins and answers were cleared from this browser.");
 }
 
 /* --------------------------------------------------------------------------
@@ -1586,6 +1399,17 @@ function wire() {
   document.addEventListener("click", (e) => {
     const b = e.target.closest("[data-dash-metric]");
     if (b) MK.setDashMetric(b.dataset.dashMetric);
+    const run = e.target.closest("[data-run-scenario]");
+    if (run && !run.disabled) MK.runFromDashboard(run.dataset.runScenario);
+    const jump = e.target.closest("[data-scroll]");
+    if (jump) {
+      const target = $(jump.dataset.scroll);
+      if (target) {
+        target.scrollIntoView({ block: "start", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+        const first = document.querySelector("[data-run-scenario]");
+        if (first) first.focus({ preventScroll: true });
+      }
+    }
   });
   $("refreshBtn").addEventListener("click", refreshData);
 
