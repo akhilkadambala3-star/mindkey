@@ -39,6 +39,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from ..context import POSITIVE_FACTOR, candidate_for
 from ..contracts import BehavioralEvidence
 from ..state import Hypothesis, HypothesisStatus
 from .evidence import EvidenceRegistry
@@ -211,6 +212,36 @@ def _status(supporting, contradicting) -> HypothesisStatus:
     return "uncertain"
 
 
+def _evaluate_h2(registry, ids, finding):
+    """Contextual disruption, decided only by self-reported check-ins.
+
+    Without check-ins in the window the question stays open (unchanged
+    behavior). A reported disruption (sleep, tiredness, stress, feeling unwell,
+    distraction) supports H2; a feeling-well report with no disruption
+    contradicts it; anything else leaves it uncertain but answered. With no
+    measured deviation (stable baseline) there is nothing for context to
+    explain, so H2 stays uncertain.
+    """
+    if not ids["context_present"]:
+        return [], [], ["context_factors"]
+    if finding.phase2_status == "stable":
+        return [], [], []
+    disruptive = []
+    positive = []
+    for item in registry.filter(kind="context_factor"):
+        if not item.key:
+            continue
+        if candidate_for(item.key) is not None:
+            disruptive.append(item.id)
+        elif item.key == POSITIVE_FACTOR:
+            positive.append(item.id)
+    if disruptive:
+        return _merge(ids["context_present"], disruptive), [], []
+    if positive:
+        return [], positive, []
+    return [], [], []
+
+
 def _evaluate_h4(registry, evidence, finding, ids):
     """Data-quality / capture artifact."""
     quality = evidence.data_quality
@@ -304,9 +335,7 @@ def evaluate_hypotheses(
 
     # H2 -- contextual disruption. Absent context is never refutation, so this
     # hypothesis can only be supported by real user-reported context rows.
-    h2_support = list(ids["context_present"])
-    h2_contradict = []
-    h2_missing = ["context_factors"]
+    h2_support, h2_contradict, h2_missing = _evaluate_h2(registry, ids, finding)
 
     # H3 -- persistent behavioral change.
     h3_support = (

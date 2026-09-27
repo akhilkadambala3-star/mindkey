@@ -112,9 +112,9 @@ What is already wired up:
 
 `user` must be a **UUID**, because the backend stores `user_id` as a uuid
 column: a malformed value is rejected by the database and the dashboard
-degrades to empty states instead of crashing. Agent status, check-ins, symptoms
-and data deletion are still **planned** — the dashboard has no live path for
-them, so those controls remain local/demo only.
+degrades to empty states instead of crashing. Check-ins are live
+(`GET`/`POST /api/users/{user_id}/checkins`). Agent status, symptoms and data
+deletion are still **planned**, so those controls remain local/demo only.
 
 The UI never changes between modes — every function in the data layer branches
 on the resolved `API_BASE`, and live mode starts from an empty state and loads
@@ -160,7 +160,8 @@ also absent from the contract; the dashboard derives it from
   implemented (Phase 4); no dashboard view yet
 - `GET /api/agent/status` → `{ state: "waiting"|"session"|"uploading"|
   "paused"|"limit", session_remaining_s, sessions_today }` — planned
-- `POST /api/users/{user_id}/checkins` → `{ user_id, date, factor, label, note }`
+- `GET /api/users/{user_id}/checkins` → `[{ id, date, factor, label, note, created_at }]` — implemented
+- `POST /api/users/{user_id}/checkins` ← `{ factor, date?, note? }` → 201 with the stored row — implemented (needs `backend/sql/001_checkins.sql` on Supabase)
 - `POST /api/users/{user_id}/symptoms` → `{ user_id, date, responses }`
 - `DELETE /api/users/{user_id}/data` → clears the user's stored data
 
@@ -197,4 +198,13 @@ fields above. That is a hard privacy boundary of the project.
 - **Rendering is defensive.** The dashboard never assumes a baseline, a session
   field, or chart data exists — an empty history, an unconnected backend or a
   partial payload degrade to "no baseline yet" / "no sessions today yet" /
-  fallback notes instead of throwing.
+  fallback notes instead of throwing.
+## v0.4 — AI Investigation, Demo Lab, Privacy Center
+
+- `lab.js` — investigation layer: 8 data states, Demo Lab, AI Investigation page, dashboard views. `mk.css` — design tokens, dark theme, components.
+- Routes are hash-based: `#/home`, `#/investigation`, `#/lab`, `#/trends`, `#/sessions`, `#/checkins`, `#/insights`, `#/privacy`, `#/settings`.
+- Demo scenarios (7) come from the **real investigation engine**. `backend/scripts/export_demo.py` writes `dashboard/demo/<key>.json`; with `?api=` set, the dashboard fetches `GET /api/demo/scenarios/<key>` instead. Loading a scenario feeds its sessions to every view.
+- Live mode (`?api=…&user=…`) renders `GET /api/users/{id}/investigation` on the AI Investigation page, and shows an honest error state if the backend is unreachable.
+- **Check-ins are agent input.** The investigation reads check-ins from the last 7 days (day + factor only; notes stay private). In demo mode each scenario's check-ins are part of the engine run; in live mode the Wellbeing page posts to `POST /api/users/{id}/checkins` and re-runs the investigation.
+- The live investigation response includes an `engine` block (trace, evidence, ML flag, final assessment), so live mode shows the same timeline and evidence explorer as the Demo Lab.
+- Deployed dashboard origin for CORS: set `MINDKEY_CORS_ORIGINS=https://your-app.vercel.app` on the backend.

@@ -24,7 +24,9 @@ from .contracts import (
     Uncertainty,
     WindowSummary,
 )
+from .context import SOURCE_CHECKINS, checkins_in_window, read_checkins
 from .tools import (
+    _reference,
     calculate_behavioral_drift,
     compare_time_windows,
     get_historical_baseline,
@@ -287,16 +289,37 @@ def build_behavioral_evidence(user_id, session_id, repository=None, *, as_of=Non
     )
 
     # --- Context ----------------------------------------------------------
-    context = ContextEvidence(
-        source="unavailable",
-        checkins=[],
-        symptoms=None,
-        note=(
-            "No backend store for check-ins or symptoms exists yet, so no "
-            "contextual factors can be retrieved. This is reported as "
-            "unavailable rather than inferred."
-        ),
-    )
+    # Check-ins are read only when the repository offers a check-in store.
+    # ``None`` (no store, or the store could not be read) keeps the original
+    # "unavailable" context byte-for-byte; a store that exists but holds no
+    # check-ins for the recent window is reported as such, never as absence
+    # of a store.
+    stored_checkins = read_checkins(repository, user_id)
+    if stored_checkins is None:
+        context = ContextEvidence(
+            source="unavailable",
+            checkins=[],
+            symptoms=None,
+            note=(
+                "No backend store for check-ins or symptoms exists yet, so no "
+                "contextual factors can be retrieved. This is reported as "
+                "unavailable rather than inferred."
+            ),
+        )
+    else:
+        in_window = checkins_in_window(
+            stored_checkins, _reference(as_of), DEFAULT_RECENT_WINDOW_DAYS
+        )
+        context = ContextEvidence(
+            source=SOURCE_CHECKINS,
+            checkins=in_window,
+            symptoms=None,
+            note=(
+                f"{len(in_window)} self-reported check-in(s) fall in the last "
+                f"{DEFAULT_RECENT_WINDOW_DAYS} day(s). Only the day and the "
+                "reported factor are used; notes are never read."
+            ),
+        )
 
     # --- Uncertainty ------------------------------------------------------
     uncertainty_reasons = []
@@ -351,11 +374,22 @@ def build_behavioral_evidence(user_id, session_id, repository=None, *, as_of=Non
         limitations.append(
             "No valid sessions were available in the baseline window."
         )
-    limitations.append(
-        "No user-provided contextual factors (sleep, fatigue, stress, symptoms) "
-        "are stored server-side yet, so alternative explanations cannot be "
-        "confirmed or ruled out."
-    )
+    if context.source == "unavailable":
+        limitations.append(
+            "No user-provided contextual factors (sleep, fatigue, stress, symptoms) "
+            "are stored server-side yet, so alternative explanations cannot be "
+            "confirmed or ruled out."
+        )
+    else:
+        limitations.append(
+            "Check-ins are self-reported context. They can make a contextual "
+            "explanation more or less plausible, but they do not establish a cause."
+        )
+        if not context.checkins:
+            limitations.append(
+                f"No check-ins were reported in the last {DEFAULT_RECENT_WINDOW_DAYS} "
+                "day(s), so contextual factors cannot be confirmed or ruled out."
+            )
     limitations.append(
         "Only structured numeric typing features are used; no typed content is "
         "read or processed."

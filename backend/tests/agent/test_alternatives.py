@@ -195,13 +195,26 @@ class EvaluatedCandidateTests(unittest.TestCase):
         )
 
     def test_technical_failure_tracks_unavailable_evidence(self):
-        registry, _, _, findings = _scan(_thin_repo(), session_id="S0001")
+        # Enough history but no stored ML result: something failed upstream.
+        registry, _, _, findings = _scan(_shifted_repo(), session_id="R0001")
         unavailable = registry.filter(kind="anomaly_unavailable")
         item = _by_candidate(findings)["technical_failure"]
         self.assertTrue(unavailable)
         self.assertEqual(item.status, "supported")
         self.assertEqual(item.reason, "evidence_source_unavailable")
         self.assertEqual(item.evidence_ids, [i.id for i in unavailable])
+
+    def test_missing_ml_result_below_the_model_minimum_is_not_a_failure(self):
+        # Production never trains a model below the minimum, so no ML result
+        # is expected; the session count explains the gap.
+        registry, _, _, findings = _scan(_thin_repo(), session_id="S0001")
+        self.assertTrue(registry.filter(kind="anomaly_unavailable"))
+        item = _by_candidate(findings)["technical_failure"]
+        self.assertEqual(item.status, "weakened")
+        self.assertEqual(item.reason, "ml_result_expected_absent_below_model_minimum")
+        self.assertEqual(
+            item.evidence_ids, [i.id for i in registry.filter(kind="session_count")]
+        )
 
         _, _, _, ok_findings = _scan(_persistent_repo())
         ok_item = _by_candidate(ok_findings)["technical_failure"]

@@ -17,34 +17,36 @@
 const $ = (id) => document.getElementById(id);
 
 const VIEW_META = {
-  home: ["Home", "Your personal behavioral overview"],
+  home: ["Dashboard", "Your personal behavioral overview"],
+  investigation: ["AI Investigation", "How the agent reached its conclusion — step by step"],
+  lab: ["Demo Lab", "Run a scenario and watch Data → ML → Agent → Insight"],
   trends: ["Trends", "How your typing pattern has changed over time"],
   sessions: ["Sessions", "A record of your analyzed typing sessions"],
-  checkins: ["Check-ins", "Context that helps explain variation"],
+  checkins: ["Wellbeing", "Context that helps explain variation"],
   symptoms: ["Symptom check", "A few additional questions"],
-  insights: ["Health Insights", "What multiple signals are telling us"],
+  insights: ["Insights", "What multiple signals are telling us"],
   care: ["Medical Assistance", "Moving from insight to professional help"],
-  privacy: ["Privacy", "What we collect — and what we never see"],
-  settings: ["Settings", "Profile, data, and preferences"],
+  privacy: ["Privacy Center", "What we collect — and what we never see"],
+  settings: ["Profile & settings", "Profile, data, and preferences"],
 };
 
 const METRICS = {
   speed: {
     label: "Typing speed",
     unit: "wpm",
-    get: (s) => s.wpm,
+    get: (s) => (isNumber(s.wpm) ? Math.round(s.wpm * 10) / 10 : s.wpm),
     base: (b) => b.wpm,
   },
   dwell: {
     label: "Dwell time",
     unit: "ms",
-    get: (s) => s.dwell_mean_ms,
+    get: (s) => (isNumber(s.dwell_mean_ms) ? Math.round(s.dwell_mean_ms) : s.dwell_mean_ms),
     base: (b) => Math.round(b.dwell_mean * 1000),
   },
   flight: {
     label: "Flight time",
     unit: "ms",
-    get: (s) => s.flight_mean_ms,
+    get: (s) => (isNumber(s.flight_mean_ms) ? Math.round(s.flight_mean_ms) : s.flight_mean_ms),
     base: (b) => Math.round(b.flight_mean * 1000),
   },
   corrections: {
@@ -181,6 +183,21 @@ const CONTEXT_NOUNS = {
 };
 
 const STATUS_META = {
+  recorded: {
+    label: "Recorded",
+    pill: "pill-neutral",
+    help: "Stored session. Individual sessions are not classified — MindKey only draws conclusions across many sessions.",
+  },
+  ml_flag: {
+    label: "ML flag",
+    pill: "pill-flag",
+    help: "The per-user Isolation Forest model flagged this session as unusual. A flag is not a diagnosis.",
+  },
+  invalid: {
+    label: "Invalid",
+    pill: "pill-invalid",
+    help: "This session failed feature validation and is excluded from the analysis.",
+  },
   normal: {
     label: "Consistent",
     pill: "pill-ok",
@@ -204,6 +221,7 @@ const STATUS_META = {
    -------------------------------------------------------------------------- */
 
 function typingState(sessions) {
+  if (typeof MK !== "undefined" && MK.state.payload) return MK.legacyTypingState();
   const tail = sessions.slice(-8);
   const flagged = tail.filter((s) => s.status === "flagged").length;
   const elevated = tail.filter((s) => s.status === "elevated").length;
@@ -286,8 +304,29 @@ function describeChanges(sessions, rangeDays) {
 
 let firstRender = true;
 
-function setView(name) {
+const VIEW_RENDERERS = () => ({
+  home: renderHome,
+  investigation: () => MK.renderInvestigation(),
+  lab: () => MK.renderLab(),
+  trends: renderTrends,
+  sessions: renderSessions,
+  checkins: renderCheckins,
+  symptoms: renderSymptoms,
+  insights: renderInsights,
+  care: renderCare,
+  privacy: renderPrivacy,
+  settings: renderSettings,
+});
+
+function rerenderCurrentView() {
+  VIEW_RENDERERS()[App.view]();
+}
+
+function setView(name, { fromHash = false } = {}) {
   if (!VIEW_META[name]) name = "home";
+  if (!fromHash && location.hash !== "#/" + name) {
+    history.pushState(null, "", "#/" + name);
+  }
   App.lastView = App.view;
   App.view = name;
 
@@ -307,18 +346,7 @@ function setView(name) {
   $("pageTitle").textContent = title;
   $("pageSubtitle").textContent = subtitle;
 
-  const renderers = {
-    home: renderHome,
-    trends: renderTrends,
-    sessions: renderSessions,
-    checkins: renderCheckins,
-    symptoms: renderSymptoms,
-    insights: renderInsights,
-    care: renderCare,
-    privacy: renderPrivacy,
-    settings: renderSettings,
-  };
-  renderers[name]();
+  VIEW_RENDERERS()[name]();
   window.scrollTo({ top: 0 });
 
   // Move focus to the new view's heading so keyboard and screen-reader users
@@ -411,8 +439,8 @@ function renderAgent() {
 
   // Today tile + the daily-limit copy. Both read the one mirrored constant so
   // the tile, the agent card and the limit message can never drift apart.
-  $("todaySessions").textContent = a.sessionCountToday;
-  $("todaySessionsLimit").textContent = AGENT_DAILY_SESSION_LIMIT;
+  if ($("todaySessions")) $("todaySessions").textContent = a.sessionCountToday;
+  if ($("todaySessionsLimit")) $("todaySessionsLimit").textContent = AGENT_DAILY_SESSION_LIMIT;
   $("agentSessionsLimit").textContent = AGENT_DAILY_SESSION_LIMIT;
 }
 
@@ -501,82 +529,8 @@ function greeting() {
 }
 
 function renderHome() {
-  $("greeting").textContent = greeting();
-  const state = typingState(App.sessions);
-  const panel = $("statusPanel");
-  const icon = $("statusIcon");
-  const headline = $("statusHeadline");
-  const text = $("statusText");
-  const observed = $("statusObserved");
-  const actions = $("statusActions");
-
-  panel.className = "status-panel state-" + state;
-
-  if (state === "ok") {
-    icon.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4.5 13 8 9.5l3 3 8.5-8.5"/></svg>';
-    $("statusEyebrow").textContent = "Behavioral status";
-    headline.textContent = "Your typing pattern is consistent";
-    text.textContent = "No meaningful change has been detected compared with your recent baseline.";
-    observed.hidden = true;
-    actions.innerHTML = `
-      <button class="btn btn-primary" data-nav="trends">View your trends</button>
-      <button class="btn btn-ghost" data-nav="checkins">Complete a check-in</button>`;
-  } else if (state === "warn") {
-    icon.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 4 3.5 19.5h17L12 4Z"/><path d="M12 10v4.5M12 17.2v.1"/></svg>';
-    $("statusEyebrow").textContent = "Behavioral status";
-    headline.textContent = "Some recent variation was detected";
-    text.textContent =
-      "A few recent sessions differ from your usual pattern. MindKey will keep observing before drawing any conclusions — everyday factors like tiredness or stress can cause short-term variation.";
-    observed.hidden = true;
-    actions.innerHTML = `
-      <button class="btn btn-primary" data-nav="checkins">Complete a short check-in</button>
-      <button class="btn btn-ghost" data-nav="trends">View trends</button>`;
-  } else {
-    icon.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4.5 13 8 9.5l3 3 8.5-8.5"/></svg>';
-    $("statusEyebrow").textContent = "Persistent change detected";
-    headline.textContent = "We've noticed a persistent change";
-    text.textContent =
-      "Your typing pattern has remained different from your usual baseline across multiple sessions. Persistent changes can have many possible explanations, including temporary factors — we'd like to understand whether anything else may explain it.";
-    observed.hidden = false;
-    $("statusObservedList").innerHTML = observedChanges()
-      .map((c) => `<li>${c}</li>`)
-      .join("");
-    actions.innerHTML = `
-      <button class="btn btn-primary" data-nav="symptoms">Continue to symptom check</button>
-      <button class="btn btn-ghost" data-nav="insights">View health insight</button>`;
-  }
-
-  // Today snapshot — tolerant of an empty day, a missing baseline, or a
-  // payload that omits a feature. None of these may break the dashboard.
-  const today = App.sessions.filter((s) => isTodayISO(s.session_start));
-  const consistencyValues = today.map((s) => s.consistency).filter(isNumber);
-  const speedValues = today.map((s) => s.wpm).filter(isNumber);
-  const dwellValues = today.map((s) => s.dwell_mean_ms).filter(isNumber);
-  const speed = speedValues.length ? Math.round(mean(speedValues)) : null;
-  const dwell = dwellValues.length ? Math.round(mean(dwellValues)) : null;
-
-  const baseWpm = baselineValue("wpm");
-  const baseDwellSeconds = baselineValue("dwell_mean");
-  const baseDwell = baseDwellSeconds == null ? null : Math.round(baseDwellSeconds * 1000);
-
-  $("todayConsistency").textContent = consistencyValues.length
-    ? Math.round(mean(consistencyValues))
-    : "–";
-  $("todaySpeed").textContent = speed ?? "–";
-  $("todayDwell").textContent = dwell ?? "–";
-  $("todaySpeedSub").textContent =
-    speed == null
-      ? "no sessions today yet"
-      : baseWpm == null
-        ? "no baseline yet"
-        : vsBaseline(speed, baseWpm, "wpm");
-  $("todayDwellSub").textContent =
-    dwell == null
-      ? "no sessions today yet"
-      : baseDwell == null
-        ? "no baseline yet"
-        : vsBaseline(dwell, baseDwell, "ms");
-
+  MK.renderDashboard();
+  MK.scenarioChip();
   renderAgent();
 }
 
@@ -666,18 +620,25 @@ function setChartSummary(sessions, metric, base) {
   const unit = metric.unit ? ` ${metric.unit}` : "";
   const latest = metric.get(sessions[sessions.length - 1]);
   const parts = [
-    `${sessions.length} sessions in the last ${App.range} days.`,
+    `${sessions.length} sessions, ${rangeLabel().toLowerCase()}.`,
     `Latest ${metric.label.toLowerCase()}: ${latest}${unit}.`,
   ];
   if (isNumber(base)) parts.push(`Your baseline: ${base}${unit}.`);
   el.textContent = parts.join(" ");
 }
 
+function rangeLabel() {
+  return App.range >= 9999 ? "All time" : `Last ${App.range} days`;
+}
+
+const cssToken = (name, fallback) =>
+  getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+
 function renderTrends() {
   const metric = METRICS[App.metric];
   $("chartTitle").textContent = metric.label;
-  $("chartSub").textContent = `Last ${App.range} days · ${UNIT_LABELS[metric.unit] || metric.label.toLowerCase()}`;
-  $("whatChangedRange").textContent = `Last ${App.range} days`;
+  $("chartSub").textContent = `${rangeLabel()} · ${UNIT_LABELS[metric.unit] || metric.label.toLowerCase()}`;
+  $("whatChangedRange").textContent = rangeLabel();
 
   // What changed? — data-driven, independent of charts.
   const changes = describeChanges(App.sessions, App.range);
@@ -689,7 +650,7 @@ function renderTrends() {
   }
 
   // Chart. Every exit path tears the previous chart down first.
-  const chartWindow = App.sessions.slice(-App.range);
+  const chartWindow = App.sessions.filter((s) => s.status !== "invalid").slice(-App.range);
   const fallback = $("chartFallback");
 
   if (!App.chartOk) {
@@ -723,7 +684,7 @@ function renderTrends() {
     data,
     baseline,
     unit: metric.unit,
-    color: "#2F6B4F",
+    color: cssToken("--chart-1", "#2F6B4F"),
   });
   setChartSummary(chartWindow, metric, base);
 }
@@ -734,7 +695,7 @@ function buildChart({ sessions, labels, data, baseline, unit, color }) {
   ctx.setAttribute("role", "img");
   ctx.setAttribute(
     "aria-label",
-    `${METRICS[App.metric].label} over the last ${App.range} days, compared with your personal baseline.`
+    `${METRICS[App.metric].label}, ${rangeLabel().toLowerCase()}, compared with your personal baseline.`
   );
 
   const datasets = [
@@ -742,7 +703,7 @@ function buildChart({ sessions, labels, data, baseline, unit, color }) {
       label: "Sessions",
       data,
       borderColor: color,
-      backgroundColor: "rgba(47, 107, 79, 0.05)",
+      backgroundColor: cssToken("--chart-1-fill", "rgba(47, 107, 79, 0.05)"),
       borderWidth: 2,
       pointRadius: 0,
       pointHoverRadius: 4,
@@ -756,7 +717,7 @@ function buildChart({ sessions, labels, data, baseline, unit, color }) {
     datasets.push({
       label: "Your baseline",
       data: baseline,
-      borderColor: "#B9B4A9",
+      borderColor: cssToken("--chart-baseline", "#B9B4A9"),
       borderWidth: 1.5,
       borderDash: [5, 5],
       pointRadius: 0,
@@ -764,9 +725,11 @@ function buildChart({ sessions, labels, data, baseline, unit, color }) {
     });
   }
 
+  const markers = typeof MK !== "undefined" ? MK.markersFor(sessions) : [];
   return new Chart(ctx, {
     type: "line",
     data: { labels, datasets },
+    plugins: typeof MK !== "undefined" ? [MK.markerPlugin] : [],
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -774,11 +737,12 @@ function buildChart({ sessions, labels, data, baseline, unit, color }) {
       interaction: { intersect: false, mode: "index" },
       plugins: {
         legend: { display: false },
+        mkMarkers: { items: markers },
         tooltip: {
-          backgroundColor: "#FFFFFF",
-          titleColor: "#26231D",
-          bodyColor: "#5C584F",
-          borderColor: "#E6E3DC",
+          backgroundColor: cssToken("--surface", "#FFFFFF"),
+          titleColor: cssToken("--text", "#26231D"),
+          bodyColor: cssToken("--text-2", "#5C584F"),
+          borderColor: cssToken("--border", "#E6E3DC"),
           borderWidth: 1,
           padding: 10,
           cornerRadius: 8,
@@ -792,7 +756,7 @@ function buildChart({ sessions, labels, data, baseline, unit, color }) {
             },
             label: (item) => {
               const suffix = unit ? ` ${unit}` : "";
-              return `${item.dataset.label === "Your baseline" ? "Your baseline" : "Sessions"}: ${item.parsed.y}${suffix}`;
+              return `${item.dataset.label === "Your baseline" ? "Your baseline" : "Sessions"}: ${Number(item.parsed.y.toFixed(2))}${suffix}`;
             },
           },
         },
@@ -800,14 +764,14 @@ function buildChart({ sessions, labels, data, baseline, unit, color }) {
       scales: {
         x: {
           grid: { display: false },
-          border: { color: "#E6E3DC" },
-          ticks: { color: "#8B857A", font: { family: "Inter", size: 11 }, maxTicksLimit: 9, maxRotation: 0 },
+          border: { color: cssToken("--border", "#E6E3DC") },
+          ticks: { color: cssToken("--chart-axis", "#8B857A"), font: { family: "Inter", size: 11 }, maxTicksLimit: 9, maxRotation: 0 },
         },
         y: {
-          grid: { color: "#EFEDE7" },
+          grid: { color: cssToken("--chart-grid", "#EFEDE7") },
           border: { display: false },
           ticks: {
-            color: "#8B857A",
+            color: cssToken("--chart-axis", "#8B857A"),
             font: { family: "Inter", size: 11 },
             callback: (v) => (unit ? `${v} ${unit}` : v),
           },
@@ -841,22 +805,34 @@ function renderSessions() {
   $("sessionsEmpty").hidden = list.length > 0;
 
   for (const s of list) {
-    const status = STATUS_META[s.status] || STATUS_META.normal;
-    // Separate ML indicator — distinct from the baseline status pill and never
-    // folded into it. A score is a number, not a diagnosis.
+    const status = STATUS_META[s.status] || STATUS_META.recorded;
+    // Separate ML indicator — distinct from the status pill and never folded
+    // into it. A score is a number, not a diagnosis.
+    const ml = s.anomaly || (s.is_anomaly != null ? { is_anomaly: s.is_anomaly, anomaly_score: s.anomaly_score } : null);
     const anomalyBadge =
-      s.is_anomaly === true
-        ? ` <span class="pill pill-warn" title="ML anomaly flag for this session${
-            isNumber(s.anomaly_score) ? ` (score ${s.anomaly_score.toFixed(3)})` : ""
-          }. A score is not a diagnosis.">Anomaly</span>`
+      ml && ml.is_anomaly === true
+        ? ` <span class="pill pill-flag" title="The per-user Isolation Forest flagged this session${
+            isNumber(ml.anomaly_score) ? ` (score ${Number(ml.anomaly_score).toFixed(2)})` : ""
+          }. A score is not a diagnosis.">ML flag</span>`
         : "";
     const tr = document.createElement("tr");
+    tr.className = "mk-session-row";
+    tr.tabIndex = 0;
+    tr.setAttribute("role", "button");
+    tr.setAttribute("aria-label", `Session on ${fmtFull(s.session_start)} at ${fmtTime(s.session_start)}: open details`);
+    tr.addEventListener("click", () => openSessionDialog(s));
+    tr.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        openSessionDialog(s);
+      }
+    });
     tr.innerHTML = `
       <td class="td-main" data-label="Date">${fmtFull(s.session_start)}<br><span class="opt">${fmtTime(s.session_start)}</span></td>
       <td data-label="Duration">${isNumber(s.duration_s) ? fmtDuration(s.duration_s) : "—"}</td>
-      <td class="num" data-label="Speed">${isNumber(s.wpm) ? `${s.wpm} <span class="opt">wpm</span>` : "—"}</td>
-      <td class="num" data-label="Dwell">${isNumber(s.dwell_mean_ms) ? `${s.dwell_mean_ms} <span class="opt">ms</span>` : "—"}</td>
-      <td class="num" data-label="Flight">${isNumber(s.flight_mean_ms) ? `${s.flight_mean_ms} <span class="opt">ms</span>` : "—"}</td>
+      <td class="num" data-label="Speed">${isNumber(s.wpm) ? `${Math.round(s.wpm)} <span class="opt">wpm</span>` : "—"}</td>
+      <td class="num" data-label="Dwell">${isNumber(s.dwell_mean_ms) ? `${Math.round(s.dwell_mean_ms)} <span class="opt">ms</span>` : "—"}</td>
+      <td class="num" data-label="Flight">${isNumber(s.flight_mean_ms) ? `${Math.round(s.flight_mean_ms)} <span class="opt">ms</span>` : "—"}</td>
       <td class="num" data-label="Corrections">${isNumber(s.correction_rate) ? `${Math.round(s.correction_rate * 100)}%` : "—"}</td>
       <td class="num" data-label="Pauses">${isNumber(s.pause_count) ? s.pause_count : "—"}</td>
       <td data-label="Status"><span class="pill ${status.pill}" title="${status.help}">${status.label}</span>${anomalyBadge}</td>`;
@@ -869,6 +845,7 @@ function renderSessions() {
    -------------------------------------------------------------------------- */
 
 function renderCheckins() {
+  MK.renderWellbeingContext();
   const wrap = $("checkinOptions");
   wrap.innerHTML = CHECKIN_OPTIONS.map(
     (o) => `
@@ -919,13 +896,22 @@ async function submitCheckinFlow() {
   }
   const opt = CHECKIN_OPTIONS.find((o) => o.id === factor);
   const note = $("checkinNote").value.trim();
-  await submitCheckin({
-    user_id: USER_ID,
-    date: new Date().toISOString().slice(0, 10),
-    factor,
-    label: opt.label,
-    note,
-  });
+  const now = new Date();
+  const localDay = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  try {
+    await submitCheckin({
+      user_id: USER_ID,
+      date: localDay,
+      factor,
+      label: opt.label,
+      note,
+    });
+  } catch (err) {
+    showToast("Your check-in wasn't saved — the backend didn't respond. Try again in a moment.");
+    return;
+  }
+  // Live mode: the investigation reads check-ins, so re-run it now.
+  if (!demoMode()) MK.loadLive().then(() => MK.renderWellbeingContext());
 
   const ctx = $("checkinContext");
   const state = typingState(App.sessions);
@@ -1043,118 +1029,161 @@ function reportedSymptoms() {
    -------------------------------------------------------------------------- */
 
 function renderInsights() {
-  const state = typingState(App.sessions);
-  const checkins = getCheckins();
-  const latest = checkins.length ? checkins[checkins.length - 1] : null;
-  const contextual = latest && ["tired", "stressed", "poor_sleep", "unwell", "distracted"].includes(latest.factor);
+  // Every statement here comes from the agent's own output (MK.insightModel);
+  // symptoms are the one input the agent does not read, and say so.
+  const m = MK.insightModel();
   const symptoms = reportedSymptoms();
+  const k = m.key;
+  const persistent = k === "PERSISTENT_CHANGE";
+  const changed = k === "CHANGE_DETECTED";
+  const tooEarly = k === "NO_DATA" || k === "BASELINE_FORMING" || k === "INSUFFICIENT_EVIDENCE";
 
-  // Signal: typing
-  const typingTexts = {
-    ok: "Your recent sessions are consistent with your personal baseline.",
-    warn: "Several recent sessions have varied from your personal baseline.",
-    alert: "Several typing metrics have shifted from your personal baseline and stayed shifted.",
-  };
-  const typingDetail = {
-    ok: "No persistent change is present. MindKey compares you with your own baseline, learned from your own typing.",
-    warn: "The variation is recent and has not yet persisted long enough to be conclusive.",
-    alert: "The change has persisted across multiple sessions, which is why MindKey is paying closer attention.",
-  };
-  $("signalTypingText").textContent = typingTexts[state];
-  $("signalTypingDetail").textContent = typingDetail[state];
+  // Signal: typing pattern (the agent's conclusion)
+  $("signalTypingText").textContent = m.state.head + ".";
+  $("signalTypingDetail").textContent = m.conclusion ? m.conclusion.statement : m.state.text({});
 
-  // Signal: wellbeing
-  if (latest) {
-    $("signalWellbeingText").textContent = `You reported "${latest.label}"${latest.note ? ` — "${latest.note}"` : ""}.`;
-    $("signalWellbeingDetail").textContent = `Check-in on ${fmtFull(latest.date)}.${contextual ? " This kind of factor can explain short-term typing variation." : ""}`;
-  } else {
-    $("signalWellbeingText").textContent = "No check-ins yet.";
-    $("signalWellbeingDetail").textContent = "Completing a check-in when you notice variation helps MindKey separate everyday causes from unexplained patterns.";
-  }
+  // Signal: wellbeing context (what the agent made of the check-ins)
+  const lastEvent = m.events.length ? m.events[m.events.length - 1] : null;
+  $("signalWellbeingText").textContent = lastEvent
+    ? `Latest check-in: ${lastEvent.label.toLowerCase()} (${fmtFull(lastEvent.date)}).`
+    : "No check-ins yet.";
+  $("signalWellbeingDetail").textContent = m.contextLines.length
+    ? m.contextLines.join(" ")
+    : "A quick check-in when you notice a change helps MindKey separate everyday causes from unexplained patterns.";
 
-  // Signal: symptoms
+  // Signal: symptoms (not agent input)
   if (symptoms.length) {
     $("signalSymptomsText").textContent = symptoms.slice(0, 2).join("; ") + (symptoms.length > 2 ? ` +${symptoms.length - 2} more` : "") + ".";
-    $("signalSymptomsDetail").textContent = "Reported in the symptom questionnaire — kept alongside your typing history, never treated as a diagnosis.";
+    $("signalSymptomsDetail").textContent = "Kept alongside your typing history for your own reference. The AI investigation does not use them, and they are never treated as a diagnosis.";
   } else {
     $("signalSymptomsText").textContent = "No symptoms reported.";
-    $("signalSymptomsDetail").textContent = "The symptom questionnaire is optional and only asked when a persistent change remains unexplained.";
+    $("signalSymptomsDetail").textContent = "The symptom check is optional. It is most useful when a persistent change isn't explained by anything you reported.";
   }
 
   // Interpretation
-  const interp = $("interpretationCard");
-  const pill = $("interpretationPill");
-  const title = $("interpretationTitle");
-  const text = $("interpretationText");
-
-  let level, pillClass, headline, body;
-  if (state === "ok") {
-    level = "ok";
-    pillClass = "pill-ok";
-    headline = "Your pattern looks consistent";
-    body = "Your recent typing behavior remains close to your personal baseline, and no additional signals suggest anything to follow up on. Keep typing normally — MindKey continues learning quietly in the background.";
-  } else if (state === "warn") {
-    if (contextual) {
-      level = "warn";
-      pillClass = "pill-warn";
-      headline = "Variation with a likely everyday explanation";
-      body = `Recent variation overlaps with what you told us — ${CONTEXT_NOUNS[latest.factor] || latest.label.toLowerCase()}. MindKey treats this as contextualized: it stays in your history, and it is understood with that context in mind. We'll keep observing to confirm things settle back.`;
-    } else {
-      level = "warn";
-      pillClass = "pill-warn";
-      headline = "Worth monitoring";
-      body = "A few recent sessions differ from your usual pattern, but the change has not persisted long enough to draw conclusions. If you can, complete a short check-in — it helps MindKey understand the context.";
-    }
+  let level, pillClass, headline, body, action = "";
+  const ctxNames = m.supportedContext.join(" and ");
+  if (tooEarly) {
+    level = "ok"; pillClass = "pill-ok"; headline = "Too early to say";
+    body = m.state.text({ validSessions: null });
+  } else if (!persistent && !changed) {
+    level = "ok"; pillClass = "pill-ok"; headline = "Your pattern looks consistent";
+    body = "Your recent typing stays close to your personal baseline. Keep typing normally; MindKey keeps learning in the background.";
+  } else if (changed && m.contextExplains) {
+    level = "warn"; pillClass = "pill-warn"; headline = "A recent change with an everyday explanation";
+    body = `The change hasn't persisted, and the agent treats ${ctxNames} as a plausible explanation. MindKey will keep watching to confirm things settle.`;
+  } else if (changed) {
+    level = "warn"; pillClass = "pill-warn"; headline = "Worth watching";
+    body = "Some signals moved, but not for long enough to draw a conclusion. A short check-in helps the agent understand the context.";
+    action = `<button class="btn btn-ghost btn-sm" data-nav="checkins" style="margin-top:10px">Add a check-in</button>`;
+  } else if (m.contextExplains) {
+    level = "warn"; pillClass = "pill-warn"; headline = "A persistent change, with reported context";
+    body = `The change has lasted across recent sessions. You also reported ${ctxNames}, which the agent treats as a plausible explanation for part of it. Check in again once things settle. If the change continues after that, talking to your usual doctor is a sensible next step.`;
+  } else if (symptoms.length) {
+    level = "alert"; pillClass = "pill-alert"; headline = "Worth discussing with a professional";
+    body = "The change has lasted across recent sessions, nothing you reported explains it, and you noted symptoms. Bringing this investigation to your usual doctor is a sensible next step. MindKey cannot tell what is behind the change.";
   } else {
-    if (symptoms.length) {
-      level = "alert";
-      pillClass = "pill-alert";
-      headline = "Professional evaluation recommended";
-      body = "Several signals have persisted: your typing pattern has stayed different from your baseline, and you've reported symptoms you don't consider normal. Because multiple signals line up over time, MindKey recommends discussing these changes with a healthcare professional.";
-    } else {
-      level = "warn";
-      pillClass = "pill-warn";
-      headline = "Further check-in recommended";
-      body = "Your typing pattern has remained different from your usual baseline, but nothing you've shared yet explains it. A few more days of observation, a short check-in, and — if the change persists — a conversation with a professional are the sensible next steps.";
-    }
+    level = "warn"; pillClass = "pill-warn"; headline = "A persistent change, not explained by context";
+    body = `The change has lasted across recent sessions${m.contextRuledOut ? ", and what you reported (feeling well) makes sleep, stress or fatigue less likely" : ""}. MindKey will keep monitoring. The optional symptom check can round out the picture.`;
+    action = `<button class="btn btn-ghost btn-sm" data-nav="symptoms" style="margin-top:10px">Take the optional symptom check</button>`;
   }
 
-  interp.className = "card interpretation interpret-" + level;
-  pill.className = "pill " + pillClass;
-  pill.textContent = headline === "Your pattern looks consistent" ? "No notable concern" : headline;
-  title.textContent = headline;
-  text.textContent = body;
+  $("interpretationCard").className = "card interpretation interpret-" + level;
+  $("interpretationPill").className = "pill " + pillClass;
+  $("interpretationPill").textContent = m.state.label;
+  $("interpretationTitle").textContent = headline;
+  $("interpretationText").innerHTML = `${escapeHtml(body)}${action ? `<br>${action}` : ""}`;
 
-  // Why?
+  // Why? — the agent's own reasons
   const why = [];
-  why.push({
-    ok: "Your recent sessions remain consistent with the baseline MindKey learned from your own typing.",
-    warn: "Your recent sessions have varied from your personal baseline — enough to notice, not enough to conclude anything yet.",
-    alert: "Your typing pattern has shifted from your personal baseline and stayed shifted across several sessions.",
-  }[state]);
+  if (m.conclusion) why.push(`Agent conclusion: ${m.conclusion.statement}`);
+  if (m.depth && m.depth.statement) why.push(m.depth.statement);
+  m.contextLines.forEach((line) => why.push(line));
+  why.push(
+    symptoms.length
+      ? `You reported ${symptoms.length} symptom${symptoms.length > 1 ? "s" : ""}: ${symptoms.join("; ")}. These are not agent input.`
+      : "No symptoms have been reported."
+  );
+  why.push("MindKey compares you with your own baseline, never with population averages.");
+  $("whyList").innerHTML = why.map((w) => `<li>${escapeHtml(w)}</li>`).join("");
+}
 
-  if (latest) {
-    why.push(
-      contextual
-        ? `You reported ${CONTEXT_NOUNS[latest.factor] || latest.label.toLowerCase()} on ${fmtFull(latest.date)} — an everyday explanation that can account for some of the variation.`
-        : `Your most recent check-in (${latest.label.toLowerCase()}, ${fmtFull(latest.date)}) provides context for this period.`
-    );
-  } else {
-    why.push("You haven't completed a check-in recently, so there's no wellbeing context for this period.");
-  }
+/* --------------------------------------------------------------------------
+   Session details — one session against the personal baseline
+   -------------------------------------------------------------------------- */
 
-  if (symptoms.length) {
-    why.push(`You reported ${symptoms.length} symptom${symptoms.length > 1 ? "s" : ""} in the questionnaire: ${symptoms.join("; ")}.`);
-  } else {
-    why.push("No symptoms have been reported, so MindKey has no symptom signal to add.");
-  }
+const SESSION_SIGNALS = [
+  { label: "Typing speed", unit: "wpm", get: (s) => s.wpm, base: (b) => b.wpm, fmt: (v) => Math.round(v) },
+  { label: "Dwell time", unit: "ms", get: (s) => s.dwell_mean_ms, base: (b) => (isNumber(b.dwell_mean) ? b.dwell_mean * 1000 : null), fmt: (v) => Math.round(v) },
+  { label: "Flight time", unit: "ms", get: (s) => s.flight_mean_ms, base: (b) => (isNumber(b.flight_mean) ? b.flight_mean * 1000 : null), fmt: (v) => Math.round(v) },
+  { label: "Correction rate", unit: "%", get: (s) => (isNumber(s.correction_rate) ? s.correction_rate * 100 : null), base: (b) => (isNumber(b.correction_rate) ? b.correction_rate * 100 : null), fmt: (v) => v.toFixed(1) },
+  { label: "Rhythm variability", unit: "s", get: (s) => s.rhythm_variability, base: (b) => b.rhythm_variability, fmt: (v) => v.toFixed(2) },
+  { label: "Pauses", unit: "", get: (s) => s.pause_count, base: (b) => b.pause_count, fmt: (v) => (Math.round(v * 10) / 10).toString() },
+];
 
-  why.push("MindKey compares you with your own baseline, not with population averages — everyone types differently.");
-  if (state === "alert") {
-    why.push("MindKey only recommends professional evaluation after the change persists across multiple sessions and across multiple signals, never from a single session or a single metric.");
-  }
+function openSessionDialog(s) {
+  const dlg = $("sessionDialog");
+  const b = App.baseline || {};
+  const threshold = (MK.state.payload && MK.state.payload.movedThreshold) || 0.1;
+  const invalid = s.status === "invalid" || s.is_valid === false;
 
-  $("whyList").innerHTML = why.map((w) => `<li>${w}</li>`).join("");
+  const rows = SESSION_SIGNALS.map((sig) => {
+    const v = sig.get(s);
+    const base = sig.base(b);
+    const rel = isNumber(v) && isNumber(base) && base !== 0 ? (v - base) / base : null;
+    const moved = isNumber(rel) && Math.abs(rel) >= threshold;
+    const change = isNumber(rel) ? `${rel > 0 ? "+" : rel < 0 ? "−" : ""}${Math.abs(Math.round(rel * 1000) / 10)}%` : "—";
+    return `<tr${moved ? ' class="moved"' : ""}>
+      <th scope="row">${sig.label}</th>
+      <td class="num">${isNumber(v) ? `${sig.fmt(v)} <span class="opt">${sig.unit}</span>` : "—"}</td>
+      <td class="num">${isNumber(base) ? `${sig.fmt(base)} <span class="opt">${sig.unit}</span>` : "—"}</td>
+      <td class="num">${change}${moved ? ' <span class="mk-moved-tag">beyond ' + Math.round(threshold * 100) + "%</span>" : ""}</td>
+    </tr>`;
+  }).join("");
+  const movedCount = SESSION_SIGNALS.filter((sig) => {
+    const v = sig.get(s), base = sig.base(b);
+    return isNumber(v) && isNumber(base) && base !== 0 && Math.abs((v - base) / base) >= threshold;
+  }).length;
+
+  const ml = s.anomaly;
+  const mlLine = invalid
+    ? "Not scored: this session failed validation."
+    : ml
+      ? `Isolation Forest anomaly score ${Number(ml.anomaly_score).toFixed(2)} (higher means more unusual for you). ${ml.is_anomaly ? "Flagged as unusual for you." : "Within your normal range."}`
+      : "Not scored: the model trains once there are at least 10 earlier valid sessions.";
+
+  const day = String(s.session_start || s.date || "").slice(0, 10);
+  const dayCheckins = MK.state.payload && MK.state.payload.source === "demo" ? MK.state.payload.checkins : getCheckins();
+  const sameDay = (dayCheckins || []).filter((c) => String(c.date).slice(0, 10) === day);
+
+  $("sessionDialogEyebrow").textContent = `Session ${s.session_id}${demoMode() ? " · demo data" : ""}`;
+  $("sessionDialogTitle").textContent = `${fmtFull(s.session_start)} · ${fmtTime(s.session_start)}`;
+  $("sessionDialogBody").innerHTML = `
+    <div class="mk-session-facts">
+      <div class="mk-stat"><b>${isNumber(s.duration_s) ? fmtDuration(s.duration_s) : "—"}</b><span>duration</span></div>
+      <div class="mk-stat"><b>${invalid ? "Invalid" : "Valid"}</b><span>data quality</span></div>
+      <div class="mk-stat"><b>${invalid ? "—" : `${movedCount} of 6`}</b><span>signals beyond ${Math.round(threshold * 100)}%</span></div>
+    </div>
+    ${invalid ? `<p class="mk-session-note">This session failed feature validation (for example, a zero typing speed), so it is excluded from the baseline, the charts and the investigation.</p>` : ""}
+    <div class="mk-session-table-wrap">
+      <table class="mk-session-table">
+        <caption class="sr-only">Signals for this session compared with the personal baseline</caption>
+        <thead><tr><th scope="col">Signal</th><th scope="col">This session</th><th scope="col">Your baseline</th><th scope="col">Change</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div class="mk-session-meta">
+      <p><strong>ML:</strong> ${escapeHtml(mlLine)}</p>
+      <p><strong>Check-in that day:</strong> ${sameDay.length ? escapeHtml(sameDay.map((c) => (CHECKIN_OPTIONS.find((o) => o.id === c.factor) || { label: c.factor }).label).join(", ")) : "none"}</p>
+      <p class="mk-muted">A single session never decides anything. The investigation looks for changes that persist across sessions and signals.</p>
+    </div>`;
+  if (typeof dlg.showModal === "function") dlg.showModal();
+  else dlg.setAttribute("open", "");
+  $("sessionDialogClose").focus();
+}
+
+function escapeHtml(v) {
+  return String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 /* --------------------------------------------------------------------------
@@ -1379,10 +1408,13 @@ async function deleteDataFlow() {
 function renderSettings() {
   $("profileName").textContent = "Demo user";
   $("profileId").textContent = USER_ID;
-  $("settingsScenarioSelect").value = DemoState.scenario;
-  $("scenarioSelect").value = DemoState.scenario;
+  const sel = $("settingsScenarioSelect");
+  if (sel && !sel.options.length) {
+    sel.innerHTML = MK.SCENARIOS.map((s) => `<option value="${s.id}">${s.title}</option>`).join("");
+  }
+  if (sel) sel.value = MK.state.scenarioId || "persistent";
   $("demoCard").hidden = !demoMode();
-  $("demoSelectWrap").style.display = demoMode() ? "inline-flex" : "none";
+  MK.scenarioChip();
   renderDemoBadge();
   renderDataSource();
 }
@@ -1407,23 +1439,81 @@ function renderDataSource() {
   demoDot.className = "dot " + (live ? "dot-muted" : "dot-ok");
   $("dataSourceDemoOpt").textContent = live ? "(inactive)" : "(active)";
   apiDot.className = "dot " + (live ? "dot-ok" : "dot-muted");
-  $("dataSourceApiOpt").textContent = live ? "(active)" : "(not connected)";
+  $("dataSourceApiOpt").textContent = live ? `(active · ${API_BASE})` : "(not connected)";
+  if ($("connectApi") && live) {
+    $("connectApi").value = API_BASE;
+    $("connectUser").value = USER_ID;
+  }
+  if ($("disconnectBtn")) $("disconnectBtn").hidden = !live;
+}
+
+/**
+ * Connect to a live backend: check /health first (a sleeping free host can
+ * take ~50 s to wake), then reload with ?api=&user= so the data layer's
+ * normal precedence stores and applies them.
+ */
+async function connectBackend(e) {
+  e.preventDefault();
+  const status = $("connectStatus");
+  const api = $("connectApi").value.trim().replace(/\/+$/, "");
+  const user = $("connectUser").value.trim();
+  if (!/^https?:\/\//.test(api)) {
+    status.textContent = "Enter the API URL, starting with https://";
+    return;
+  }
+  if (!user) {
+    status.textContent = "Enter the user ID whose data you want to see.";
+    return;
+  }
+  $("connectBtn").disabled = true;
+  status.textContent = "Checking the backend… a free host can take up to a minute to wake up.";
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 75000);
+    const res = await fetch(`${api}/health`, { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(String(res.status));
+    const url = new URL(location.href);
+    url.search = `?api=${encodeURIComponent(api)}&user=${encodeURIComponent(user)}`;
+    url.hash = "#/home";
+    location.assign(url.toString());
+  } catch (err) {
+    status.textContent =
+      "Couldn't reach the backend. Check the URL, and that it allows this site's address (CORS).";
+    $("connectBtn").disabled = false;
+  }
+}
+
+function disconnectBackend() {
+  const url = new URL(location.href);
+  url.search = "?api=demo";
+  url.hash = "#/home";
+  location.assign(url.toString());
 }
 
 /* --------------------------------------------------------------------------
    Data refresh / scenario switching
    -------------------------------------------------------------------------- */
 
-function applyScenario(key) {
-  setScenario(key);
-  App.sessions = DemoState.sessions;
-  App.baseline = DemoState.baseline;
+async function applyScenario(id) {
+  await MK.loadScenario(id);
+  MK.applyToDashboard();
   App.symptoms = {};
   agentResetDay();
+  onScenarioApplied();
   setView("home");
 }
 
-async function refreshData() {
+/** Called whenever the Demo Lab loads a scenario into the dashboard. */
+function onScenarioApplied() {
+  App.sessions = DemoState.sessions;
+  App.baseline = DemoState.baseline;
+  MK.scenarioChip();
+  const sel = $("settingsScenarioSelect");
+  if (sel && sel.options.length) sel.value = MK.state.scenarioId;
+}
+
+async function refreshData({ silent = false } = {}) {
   setLoading(true);
   try {
     const [sessions, baseline, anomalies] = await Promise.all([
@@ -1436,24 +1526,19 @@ async function refreshData() {
     App.sessions = (Array.isArray(sessions) ? sessions : []).map((s) => {
       const anomaly = anomalies && anomalies[String(s.session_id)];
       return anomaly
-        ? { ...s, is_anomaly: anomaly.is_anomaly, anomaly_score: anomaly.anomaly_score }
+        ? {
+            ...s,
+            is_anomaly: anomaly.is_anomaly,
+            anomaly_score: anomaly.anomaly_score,
+            anomaly: { is_anomaly: anomaly.is_anomaly, anomaly_score: anomaly.anomaly_score },
+          }
         : s;
     });
     App.baseline = baseline || null;
-    const renderers = {
-      home: renderHome,
-      trends: renderTrends,
-      sessions: renderSessions,
-      checkins: renderCheckins,
-      symptoms: renderSymptoms,
-      insights: renderInsights,
-      care: renderCare,
-      privacy: renderPrivacy,
-      settings: renderSettings,
-    };
-    renderers[App.view]();
+    if (!demoMode()) await Promise.all([MK.loadLive(), refreshCheckins()]);
+    rerenderCurrentView();
     renderDemoBadge();
-    showToast(demoMode() ? "Demo data refreshed." : "Data refreshed.");
+    if (!silent) showToast(demoMode() ? "Demo data refreshed." : "Data refreshed.");
   } catch (err) {
     // A failed refresh must never leave the dashboard in a broken state.
     showToast("Could not load new data. The current view is unchanged — try again.");
@@ -1494,7 +1579,14 @@ function wire() {
   });
 
   // Topbar
-  $("scenarioSelect").addEventListener("change", (e) => applyScenario(e.target.value));
+  $("themeBtn").addEventListener("click", MK.toggleTheme);
+  $("connectForm").addEventListener("submit", connectBackend);
+  $("disconnectBtn").addEventListener("click", disconnectBackend);
+  window.addEventListener("popstate", () => setView(viewFromHash(), { fromHash: true }));
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-dash-metric]");
+    if (b) MK.setDashMetric(b.dataset.dashMetric);
+  });
   $("refreshBtn").addEventListener("click", refreshData);
 
   // Trends controls
@@ -1545,33 +1637,29 @@ function wire() {
   $("symptomBack").addEventListener("click", () => setView(App.lastView === "symptoms" ? "home" : App.lastView));
 
   // Insights
-  $("insightCareBtn").addEventListener("click", () => setView("care"));
   $("insightTrendsBtn").addEventListener("click", () => setView("trends"));
 
   // Privacy
   $("viewDataBtn").addEventListener("click", openDataDialog);
   $("dataDialogClose").addEventListener("click", () => $("dataDialog").close());
+  $("sessionDialogClose").addEventListener("click", () => $("sessionDialog").close());
+  $("sessionDialog").addEventListener("click", (e) => {
+    if (e.target === $("sessionDialog")) $("sessionDialog").close();
+  });
   $("dataDialog").addEventListener("click", (e) => {
     if (e.target === $("dataDialog")) $("dataDialog").close();
   });
   $("deleteDataBtn").addEventListener("click", deleteDataFlow);
+  $("exportDataBtn").addEventListener("click", exportDataFlow);
   $("exclusionsBtn").addEventListener("click", () =>
     showToast("Application exclusions are planned — the desktop agent doesn't support per-app filtering yet.")
   );
 
   // Settings
   $("settingsScenarioSelect").addEventListener("change", (e) => applyScenario(e.target.value));
-  $("regenerateBtn").addEventListener("click", () => {
-    setScenario(DemoState.scenario);
-    App.sessions = DemoState.sessions;
-    App.baseline = DemoState.baseline;
-    agentResetDay();
-    renderSettings();
-    showToast("Demo data regenerated.");
-  });
   $("resetDemoBtn").addEventListener("click", async () => {
     await deleteAllData();
-    applyScenario("variation");
+    await applyScenario("persistent");
     showToast("Demo data reset.");
   });
 }
@@ -1580,18 +1668,47 @@ function wire() {
    Init
    -------------------------------------------------------------------------- */
 
+function viewFromHash() {
+  const v = (location.hash || "").replace(/^#\/?/, "");
+  return VIEW_META[v] ? v : "home";
+}
+
+/** Export: downloads what the dashboard currently holds (demo: local data). */
+function exportDataFlow() {
+  const payload = {
+    exported_at: new Date().toISOString(),
+    data_source: demoMode() ? "demo" : "live",
+    user_id: USER_ID,
+    sessions: App.sessions,
+    baseline: App.baseline,
+    checkins: getCheckins(),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "mindkey-export.json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  showToast("Export downloaded — timing features only, no typed content.");
+}
+
 async function init() {
   App.chartOk = typeof Chart !== "undefined";
   wire();
   renderCheckinHistory();
 
   if (demoMode()) {
-    setScenario("variation");
-    App.sessions = DemoState.sessions;
-    App.baseline = DemoState.baseline;
+    renderSettings();
+    MK.state.loading = true;
+    setView(viewFromHash(), { fromHash: true });
+    await MK.loadScenario(MK.savedScenario());
+    MK.applyToDashboard();
+    onScenarioApplied();
     agentResetDay();
     renderSettings();
-    setView("home");
+    rerenderCurrentView();
   } else {
     // Live mode. Start from an honest empty state and load real data — never
     // seed simulated rows here, because they would be shown labelled "live".
@@ -1599,9 +1716,9 @@ async function init() {
     App.baseline = null;
     App.agent.state = "waiting";
     renderSettings();
-    setView("home");
-    await refreshData();
+    setView(viewFromHash(), { fromHash: true });
+    await refreshData({ silent: true });
   }
 }
 
-init();
+init();

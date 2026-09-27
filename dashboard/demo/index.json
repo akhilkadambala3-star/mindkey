@@ -1,0 +1,37 @@
+[
+ {
+  "key": "consistent",
+  "title": "Consistent with baseline",
+  "description": "Thirty stable sessions with no recent deviation."
+ },
+ {
+  "key": "recent_variation",
+  "title": "Recent variation",
+  "description": "A single-signal recent shift that does not persist."
+ },
+ {
+  "key": "persistent_change",
+  "title": "Persistent change",
+  "description": "A multi-signal recent shift plus an anomaly flag on the trigger."
+ },
+ {
+  "key": "sudden_change",
+  "title": "Sudden change",
+  "description": "A sharp multi-signal shift confined to the two most recent sessions."
+ },
+ {
+  "key": "recovery",
+  "title": "Recovery",
+  "description": "An earlier multi-signal shift that has returned to the baseline."
+ },
+ {
+  "key": "insufficient_history",
+  "title": "Insufficient history",
+  "description": "Only three stored sessions: below the model minimum."
+ },
+ {
+  "key": "invalid_data",
+  "title": "Data-quality issue",
+  "description": "A dense valid history plus one stored row that fails validation."
+ }
+]

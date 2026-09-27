@@ -32,6 +32,9 @@ class SessionRepository(Protocol):
         """Return the stored anomaly-result row for ``session_id``, if any."""
         ...
 
+    # Optional capability: ``list_checkins(user_id) -> list[dict] | None``.
+    # Repositories without it are treated as having no check-in store.
+
 
 class SupabaseSessionRepository:
     """Read-only Supabase implementation of :class:`SessionRepository`."""
@@ -80,6 +83,25 @@ class SupabaseSessionRepository:
 
         rows = result.data or []
         return dict(rows[0]) if rows else None
+
+    def list_checkins(self, user_id: str) -> list[dict] | None:
+        """Stored wellbeing check-ins (day + factor) for ``user_id``.
+
+        Returns ``None`` when the ``checkins`` table cannot be read (for
+        example before the migration has been run), so the investigation
+        reports context as unavailable instead of failing.
+        """
+        try:
+            result = (
+                self._client.table("checkins")
+                .select("date,factor")
+                .eq("user_id", user_id)
+                .execute()
+            )
+        except Exception as exc:
+            logger.warning("Check-ins unavailable for a user: %s", exc)
+            return None
+        return list(result.data or [])
 
 
 def default_repository():

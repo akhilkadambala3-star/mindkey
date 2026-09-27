@@ -16,4 +16,8 @@ __pycache__/
 Thumbs.db
 
 backend/.env
+
+# Local offline store (MINDKEY_STORE=local)
+backend/.local/
+
 .freebuff/

@@ -1,6 +1,8 @@
+import datetime as dt
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from investigation.agent import GroundedReport
 
@@ -145,6 +147,33 @@ class InvestigationReadModel(BaseModel):
     stop_reason: str
     evidence_digest: str | None = None
     report: GroundedReport | None = None
+    engine: dict | None = None
     timeline: list[str]
     limitations: list[str]
-    disclaimer: str
+    disclaimer: str
+
+
+# ---------------------------------------------------------------------------
+# Wellbeing check-ins (user-reported context for the investigation)
+# ---------------------------------------------------------------------------
+
+CheckinFactor = Literal[
+    "feeling_well", "tired", "stressed", "poor_sleep", "unwell", "distracted", "other"
+]
+
+
+class CheckinCreate(BaseModel):
+    """One self-reported check-in. ``date`` defaults to today (UTC)."""
+
+    factor: CheckinFactor
+    date: dt.date | None = None
+    note: str | None = Field(default=None, max_length=280)
+
+
+class CheckinReadModel(BaseModel):
+    id: str
+    date: str | None = None
+    factor: str
+    label: str | None = None
+    note: str | None = None
+    created_at: str | None = None
